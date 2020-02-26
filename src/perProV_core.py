@@ -274,6 +274,7 @@ def getMut(mutations, strand):
     for deletion, change so that ref include only one AA, alt change to empty
     '''
     tdf_mut = df_mutations.loc[mutations]
+    tdf_mut['variant_id'] = tdf_mut.apply(lambda x:'{}-{}-{}-{}'.format(x['chr'], x['pos'], x['ref'], x['alt']),axis=1)
     
     results = []
     for row, r in tdf_mut.iterrows():
@@ -281,22 +282,23 @@ def getMut(mutations, strand):
         pos = r['pos']
         ref = r['ref']
         alt = r['alt']
+        variant_id = r['variant_id']
         if len(ref) == 1:
             if strand == '+':
-                results.append([chromosome, pos, ref, alt])
+                results.append([chromosome, pos, ref, alt, variant_id])
             else:
-                results.append([chromosome, pos, f_rc(ref), f_rc(alt)])
+                results.append([chromosome, pos, f_rc(ref), f_rc(alt), variant_id])
         else:
             for n in range(1, len(ref)):
                 p = pos + n
                 r = ref[n]
                 if strand == '+':
-                    results.append([chromosome, p, r, ''])
+                    results.append([chromosome, p, r, '', variant_id])
                 else:
-                    results.append([chromosome, p, f_rc(r), ''])
+                    results.append([chromosome, p, f_rc(r), '', variant_id])
     
     tdf_m = pd.DataFrame(results)
-    tdf_m.columns = ['chr','pos','ref','alt']
+    tdf_m.columns = ['chr','pos','ref','alt','variant_id']
     return tdf_m
 
 def getCodons(ttdf, AA_len=None):
@@ -308,8 +310,8 @@ def getCodons(ttdf, AA_len=None):
     if AA_len is None:
         AA_len = ttdf.shape[0] // 3
     ttdf = ttdf.iloc[:AA_len * 3]
-    tdf_result = ttdf.groupby(np.arange(AA_len * 3) // 3).agg({'chr':'first', 'strand':'first', 'locs':'first', 'bases':lambda x:''.join(x)})
-    tdf_result.columns = ['chr', 'strand', 'codon1', 'codon']
+    tdf_result = ttdf.groupby(np.arange(AA_len * 3) // 3).agg({'chr':'first', 'strand':'first', 'locs':'first', 'bases':lambda x:''.join(x), 'variant_id':lambda x:','.join(list(dict.fromkeys([e for e in list(x) if pd.notnull(e)])))})
+    tdf_result.columns = ['chr', 'strand', 'codon1', 'codon','variants']
     return tdf_result
 
 def translateCDSplusWithMut(transcript_id):
@@ -359,8 +361,8 @@ def translateCDSplusWithMut(transcript_id):
             df_CDSplus.loc[1,'new_nt'] = df_CDSplus.iloc[1]['ref']
             
 #    print(time.time() - t0)
-    df_CDSref = df_CDSplus[['locs', 'bases', 'chr', 'strand']].copy()
-    df_CDSalt = df_CDSplus[['locs', 'new_nt', 'chr', 'strand']].copy()
+    df_CDSref = df_CDSplus[['locs', 'bases', 'chr', 'strand','variant_id']].copy()
+    df_CDSalt = df_CDSplus[['locs', 'new_nt', 'chr', 'strand','variant_id']].copy()
     # modify df_CDSalt so that each line with only one base
     df_CDSalt['bases'] = df_CDSalt['new_nt'].apply(list)
     df_CDSalt = df_CDSalt.explode('bases')
@@ -372,6 +374,8 @@ def translateCDSplusWithMut(transcript_id):
     if len(AA_translate) > AA_len:#in some cases, the protein sequences are not stop at stop codon but a little earlier
         AA_seq = AA_translate#if AA_translate shorter than AA_seq, there are usually non-standard codons, stop codon to AA
         AA_len = len(AA_seq)
+    
+    
     codons_ref = getCodons(df_CDSref, AA_len=AA_len)
     codons_alt = getCodons(df_CDSalt, AA_len=None)
     codons_ref['AA_ref'] = list(AA_seq)
@@ -379,24 +383,42 @@ def translateCDSplusWithMut(transcript_id):
     if frame !=0: codons_ref['AA_index'] = codons_ref['AA_index'] + 1
     # add ref AA to codon_alt
     codons_alt = codons_alt.merge(codons_ref, left_on=['chr','strand','codon1'], right_on=['chr','strand','codon1'], how='left')
-    codons_alt.columns = ['chr','strand','codon1', 'codon_alt', 'codon_ref', 'AA_ref','AA_index']
+    codons_alt.columns = ['chr','strand','codon1', 'codon_alt','variants', 'codon_ref', 'variants2','AA_ref','AA_index']
     codons_alt['AA_alt'] = codons_alt.apply(lambda x:x['AA_ref'] if x['codon_alt'] == x['codon_ref'] else str(Seq(x['codon_alt']).translate()), axis=1)
     codons_alt['AA_index'] = codons_alt['AA_index'].fillna(method='ffill')
     new_AA = str(''.join(codons_alt['AA_alt']).split('*')[0])
 #    print(time.time() - t0)
+    
     # check if final reading frame is the same
-    frameChange = codons_alt[codons_alt['codon1'] == codons_ref.iloc[-1]['codon1']].shape[0] != 1
+    t_last_frame = codons_alt[codons_alt['codon1'] == codons_ref.iloc[-1]['codon1']]
+    if t_last_frame.shape[0] == 1:#final reading frame the same
+        t_alt = codons_alt.loc[0:t_last_frame.index[0]]# cut to the last reading frame
+        if '*' in set(t_alt['AA_alt']):
+            t_alt = t_alt.loc[0:t_alt[t_alt['AA_alt'] == '*'].first_valid_index()] # cut to the first stop codon
+            if pd.isnull(t_alt.iloc[-1]['AA_ref']):
+                frameChange = True
+            else:
+                frameChange =False
+        else:
+            frameChange = False
+    else:
+        frameChange = True
+    
 #    print(time.time() - t0)
     # check if there is a stop gain
-    t_alt = codons_alt[codons_alt['AA_ref'].notnull() & (codons_alt['AA_alt'] == '*')]
+    t_alt = codons_alt.iloc[:len(AA_seq)]
+    t_alt = t_alt[(t_alt['AA_alt'] == '*')]
     if t_alt.shape[0] > 0:
         stopGain = True
-        AA_stopGain = ';'.join(t_alt.apply(lambda x:x['AA_ref'] + str(int(x['AA_index'])) + x['AA_alt'], axis=1))
+        x = t_alt.iloc[0].copy()
+        if pd.isnull(x['AA_ref']):x['AA_ref'] = '-'
+        AA_stopGain = x['AA_ref'] + str(int(x['AA_index'])) + x['AA_alt'] + "({})".format(x['variants'])
         stopAA_index = t_alt.iloc[0]['AA_index']
     else:
         stopGain = False
         AA_stopGain = ''
 #    print(time.time() - t0)
+    
     # check if there is a stop loss
     t_alt = codons_alt[codons_alt['codon1'] == codons_ref.iloc[-1]['codon1']]
     stopLoss = False
@@ -405,12 +427,15 @@ def translateCDSplusWithMut(transcript_id):
         if t_alt.index[0]+1 in codons_alt.index:
             if codons_alt.loc[t_alt.index[0]+1]['AA_alt'] != '*':
                 stopLoss = True
-                stopLoss_pos = codons_alt.loc[t_alt.index[0]+1]['AA_index']
-                codons_alt = codons_alt.loc[:int(stopLoss_pos-1)]
+                stopLoss_position = int(codons_alt.loc[t_alt.index[0]+1]['AA_index'])
+                stopLoss_pos = str(stopLoss_position) + "({})".format(codons_alt.loc[t_alt.index[0]+1]['variants'])
+                codons_alt = codons_alt.loc[:int(stopLoss_position-1)]
 #    print(time.time() - t0)
+    
     if stopGain:
         codons_alt = codons_alt.iloc[:len(new_AA)]#cut at valid sequences in new_AA
         codons_ref = codons_ref[codons_ref['AA_index'] < stopAA_index]
+    
     if frameChange:
         codons_alt = codons_alt.loc[:codons_alt['AA_ref'].last_valid_index()]#cut at last match with codon_ref
         codons_ref = codons_ref[codons_ref['AA_index'] <= codons_alt['AA_index'].max()]#cut at no frame change codon with codon_alt
@@ -422,7 +447,7 @@ def translateCDSplusWithMut(transcript_id):
     n_variant_AA = (t_alt['AA_ref'] != t_alt['AA_alt']).sum()
     if n_variant_AA > 0:
         t_alt = t_alt[t_alt['AA_ref'] != t_alt['AA_alt']]
-        variant_AA = ';'.join(t_alt.apply(lambda x:x['AA_ref'] + str(int(x['AA_index'])) + x['AA_alt'], axis=1))
+        variant_AA = ';'.join(t_alt.apply(lambda x:x['AA_ref'] + str(int(x['AA_index'])) + x['AA_alt'] + '({})'.format(x['variants']), axis=1))
     else:
         variant_AA = ''
     # get deletions
@@ -430,14 +455,14 @@ def translateCDSplusWithMut(transcript_id):
     n_deletion_AA = len(deletion_AA)
     if n_deletion_AA > 0:
         t_ref = codons_ref[codons_ref['AA_index'].isin(deletion_AA)]
-        deletion_AA = ';'.join(t_ref.apply(lambda x:x['AA_ref'] + str(int(x['AA_index'])) + '-', axis=1))
+        deletion_AA = ';'.join(t_ref.apply(lambda x:x['AA_ref'] + str(int(x['AA_index'])) + '-' + '({})'.format(x['variants']), axis=1))
     else:
         deletion_AA = ''
     # get insertions
     t_alt = codons_alt[codons_alt['AA_ref'].isnull()]
     n_insertion_AA = t_alt.shape[0]
     if n_insertion_AA > 0:
-        insertion_AA = ';'.join(t_alt.apply(lambda x:'-' + str(int(x['AA_index'])) + x['AA_alt'], axis=1))
+        insertion_AA = ';'.join(t_alt.apply(lambda x:'-' + str(int(x['AA_index'])) + x['AA_alt'] + '({})'.format(x['variants']), axis=1))
     else:
         insertion_AA = ''
         
@@ -459,7 +484,7 @@ def translateCDSplusWithMut2(transcript_id):
     try:
         return translateCDSplusWithMut(transcript_id)
     except:
-        print(transcript_id)
+        print(transcript_id, 'cannot be processed properly, please check')
         return transcript_id
 
 
@@ -530,7 +555,7 @@ if __name__ == '__main__':
     df_transcript3['AA_seq'] = df_transcript3.apply(lambda x:x['AA_seq'] if pd.notnull(x['AA_seq']) else x['AA_translate'], axis=1)
     
     pool = Pool(cpu_counts)
-    results = pool.map(translateCDSplusWithMut, list(df_transcript3.index))
+    results = pool.map(translateCDSplusWithMut2, list(df_transcript3.index))
     pool.close()
     pool.join()
     tdf = pd.DataFrame(results)
