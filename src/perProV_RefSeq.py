@@ -8,14 +8,7 @@ from multiprocessing import Pool
 from collections import Counter
 import os
 import time
-
-#file_genome = '/projectsp/f_jx76_1/xiaolong/genome/human/GRCh38/GCA_000001405.28_GRCh38.p13_genomic.fna.gz'
-#file_proteins = '/projectsp/f_jx76_1/xiaolong/genome/human/GENCODE/GRCh38.p13_release33/gencode.v33.pc_translations.fa.gz'
-#file_gtf = '/projectsp/f_jx76_1/xiaolong/genome/human/GENCODE/GRCh38.p13_release33/gencode.v33.chr_patch_hapl_scaff.annotation.gtf.gz'
-#file_mutations = '/projectsp/f_jx76_1/xiaolong/2020humanRefPr/GENCODE/gnomAD3AF0.01ExonEthnics/adj.csv.gz'
-#outprefix = '/projectsp/f_jx76_1/xiaolong/2020humanRefPr/GENCODE/20200216EthnicProteins/all'
-#cpu_counts = os.cpu_count()
-
+import re
 
 def parse_mutations(file_mutations):
     '''
@@ -29,7 +22,7 @@ def parse_mutations(file_mutations):
     df_mutations['chr'] = df_mutations['chr'].apply(lambda x:x[3:] if x.startswith('chr') else x)
     return df_mutations
 
-def parse_gtf_gencode(file_gtf):
+def parse_gtf_refseq(file_gtf):
     '''
     given a gtf file of gencode, filter only coding transcripts. 
     For the attribute field, convert them to columns of df_gtf
@@ -45,21 +38,19 @@ def parse_gtf_gencode(file_gtf):
     tls = []
     for i in df_gtf['attribute']:
         tdc = {}
-        es = i.strip(';').split(';')
+        es = re.findall('\w* ".*?";',i)
         for e in es:
-            k,v = e.split()
+            e = e.strip().strip(';')
+            k,v = e.split(' ',1)
             v = v.strip('"')
             tdc[k] = v
         tls.append(tdc)
     tdf = pd.DataFrame(tls)
     df_gtf = pd.concat([df_gtf, tdf], axis=1)
     df_gtf = df_gtf.drop('attribute', axis=1)
-    ## only keep those with protein sequences
-    df_gtf = df_gtf[df_gtf['protein_id'].notna()].copy()
-
     return df_gtf
 
-def parse_proteins_gencode(file_proteins):
+def parse_proteins_refseq(file_proteins):
     '''
     return a dataframe with file_proteins from gencode
     '''
@@ -68,9 +59,9 @@ def parse_proteins_gencode(file_proteins):
         tls =list(SeqIO.parse(gzip.open(file_proteins,'rt'), 'fasta'))
     else:
         tls =list(SeqIO.parse(open(file_proteins,'r'), 'fasta'))
-    df_protein = pd.DataFrame([seq.id.split('|') + [str(seq.seq)] for seq in tls])
-    df_protein.columns = ['protein_id', 'transcript_id', 'gene_id', 'havana_gene', 'havana_transcript', 'transcript_name', 'gene_name', 'AA_length', 'AA_seq']
-    print('from the protein file, totally', len(tls), 'protein sequences. number of unique gene_id, transcript_id and protein_id are', df_protein.gene_id.unique().shape[0], df_protein.transcript_id.unique().shape[0], df_protein.protein_id.unique().shape[0])
+    df_protein = pd.DataFrame([[seq.id] + [seq.description.split(' ', maxsplit=1)[1].replace(' [Homo sapiens]',''), str(seq.seq)] for seq in tls])
+    df_protein.columns = ['protein_id', 'protein_description','AA_seq']
+    print('from the protein file, totally', len(tls), 'protein sequences.', df_protein.protein_id.unique().shape[0])
     return df_protein
 
 def parse_genome(file_genome):
@@ -84,50 +75,34 @@ def parse_genome(file_genome):
         tdc = SeqIO.to_dict(SeqIO.parse(gzip.open(file_genome,'rt'), 'fasta'))
     else:
         tdc = SeqIO.to_dict(SeqIO.parse(open(file_genome,'r'), 'fasta'))
-    dc_chrom = {}
+    df_chrom = pd.DataFrame(index = tdc.keys())
+    df_chrom['seq'] = [str(v.seq).upper() for v in tdc.values()]
+    df_chrom['description'] = [v.description for v in tdc.values()]
     for k,v in tdc.items():
         for chromosome in chromosomes:
-            if f'chromosome {chromosome}, GRCh38 reference primary assembly' in v.description:
-                dc_chrom[chromosome] = str(v.seq).upper()
+            if f'Homo sapiens chromosome {chromosome}, GRCh38.p13 Primary Assembly' in v.description:
+                df_chrom.loc[k,'chr'] = chromosome
+                #print(k, chromosome,df_chrom.loc[k,'chr'])
                 break
         else:
             if f'Homo sapiens mitochondrion, complete genome' in v.description:
-                dc_chrom['M'] = str(v.seq).upper()
+                df_chrom.loc[k,'chr'] = 'M'
             else:
-                dc_chrom[k] = str(v.seq).upper()
+                df_chrom.loc[k,'chr'] = k
     del tdc
-    print('number of genomic fragments is :', len(dc_chrom))
-    print('major chromosomes', [e for e in chromosomes if e in dc_chrom])
-    return dc_chrom
+    print('number of genomic fragments is :', df_chrom.shape[0])
+    print('major chromosomes', [e for e in chromosomes if e in list(df_chrom['chr'])])
+    return df_chrom
 
 
 
-def get_df_transcripts_from_df_gtf(df_gtf):
+def get_df_transcripts_from_df_gtf_refseq(df_gtf):
     # create dataframe of transcripts based on gtf file
     tdf = df_gtf[df_gtf['feature'] == 'CDS']
     df_transcript2 = tdf.drop_duplicates(subset='transcript_id', keep='first') # the same size as df_transcript
-    df_transcript2 = df_transcript2[['seqname','gene_id', 'transcript_id', 'protein_id','gene_name','hgnc_id','strand']]
+    df_transcript2 = df_transcript2[['seqname','gene_id', 'transcript_id', 'protein_id','gene','db_xref','strand','description']]
     print('from the gtf file,', df_transcript2.shape[0], 'transcripts can be translated.')
     return df_transcript2.copy()
-
-def addAA_seq(df_transcript2, file_proteins):
-    '''
-    file_proteins is the file with annotated protein sequences
-    add column AA_seq to df_transcript2, as the annotated protein sequences
-    '''
-    if file_proteins is None:
-        df_transcript2['AA_seq'] = None
-        return df_transcript2
-    
-    # get df_protein
-    df_protein = parse_proteins_gencode(file_proteins)
-    ## append protein sequence to df_transcript2
-    tdf = df_protein[['transcript_id','AA_seq']]# cannot use protein_id, as some protein_id from same transcripts, not one to one due to alternative fragments in the genome
-    print('number of unique transcripts in gtf file and protein sequence file are', df_transcript2.shape[0], tdf.shape[0])
-    if tdf['transcript_id'].unique().shape[0] != tdf.shape[0]:
-        print('something wrong. the transcript id in protein sequence file is not unique')
-    df_transcript2 = df_transcript2.merge(tdf, left_on = 'transcript_id', right_on='transcript_id', how='left')#110809
-    return df_transcript2
 
 
 def getCDSplus(tdf):
@@ -136,69 +111,49 @@ def getCDSplus(tdf):
     given a transcript_id, get the DNA_seq based on the gtf annotation
     dcgtf_transcript is a dict with transcript_id as key, and gtf dataframe for that transcript as value
     '''
-#    tdf = dcgtf_transcript[transcript_id]
+    #tdf = dcgtf_transcript[transcript_id]
     transcript_id, tdf = tdf
     tdf = tdf[tdf['feature'].isin(['exon','CDS'])]
     strand = tdf['strand'].iloc[0]
+    #tdf = tdf[['feature','start','end']]
+    
     if strand =='+':
         tdf = tdf.sort_values(by='start')# sort by location from small to large if positive strand
     else:
         tdf = tdf.sort_values(by='start', ascending=False) #negative strand, from large to small
-    # remove rows before the first exon till the first CDS, then remove all CDS
-    keep = []
-    for i in range(tdf.shape[0]):
-        if tdf.iloc[i]['feature'] != 'CDS':
-            keep.append(False)
-        else:
-            keep.append(True)
-            frame = tdf.iloc[i]['frame']
-            break
-    for j in range(i+1, tdf.shape[0]):
-        if tdf.iloc[j]['feature'] == 'CDS':
-            keep.append(False)
-        else:
-            if strand == '+':
-                if tdf.iloc[j]['start'] >= tdf.iloc[i]['end']:
-                    keep.append(True)
-                else:
-                    keep.append(False)
+    
+    # if with no "exon" info, which is true for some refseq sequences, keep all CDS positions
+    if "exon" not in set(tdf["feature"]):
+        keep = [True for i in range(tdf.shape[0])]
+    else:
+        # remove rows before the first exon till the first CDS, then remove all CDS
+        keep = []
+        for i in range(tdf.shape[0]):
+            if tdf.iloc[i]['feature'] != 'CDS':
+                keep.append(False)
             else:
-                if tdf.iloc[j]['end'] <= tdf.iloc[i]['start']:
-                    keep.append(True)
+                keep.append(True)
+                break
+        for j in range(i+1, tdf.shape[0]):
+            if tdf.iloc[j]['feature'] == 'CDS':
+                keep.append(False)
+            else:
+                if strand == '+':
+                    if tdf.iloc[j]['start'] >= tdf.iloc[i]['end']:
+                        keep.append(True)
+                    else:
+                        keep.append(False)
                 else:
-                    keep.append(False)
+                    if tdf.iloc[j]['end'] <= tdf.iloc[i]['start']:
+                        keep.append(True)
+                    else:
+                        keep.append(False)
+    
     tdf = tdf[keep]
     tlocs = [(i-1,j) for i,j in zip(tdf['start'], tdf['end'])]
     tlocs = sorted(tlocs, key=lambda x:x[0]) # sort by location from small to large
-    return transcript_id, frame, tlocs
+    return transcript_id, tlocs
     
-def addCDSplus_notes(df_transcript2, df_gtf, file_genome, cpu_counts):
-    '''
-    get CDSplus sequences, frame, genomicLocs, genomicStart, genomicEnd for df_transcript2
-    df_gtf is the gtf dataframe
-    file_genome is genomic DNA sequence
-    '''
-    # get CDSplus sequences
-    df_gtf_group = df_gtf.groupby('transcript_id')
-    
-    pool = Pool(cpu_counts)
-    results = pool.map(getCDSplus, df_gtf_group)
-    pool.close()
-    pool.join()
-    
-    tdf = pd.DataFrame(results)
-    tdf.columns = ['transcript_id','frame', 'genomicLocs']
-    df_transcript2 = df_transcript2.merge(tdf, left_on = 'transcript_id', right_on='transcript_id', how='left')
-    print('finishing get locs and frame')
-    
-    # get genome DNA sequences
-    dc_chrom = parse_genome(file_genome)
-    print('finish reading genome file')
-    
-    df_transcript2['CDSplus'] = df_transcript2.apply(lambda x:''.join([dc_chrom[x['seqname']][i:j] for i,j in x['genomicLocs']]), axis=1)
-    df_transcript2['genomicStart'] = df_transcript2['genomicLocs'].apply(lambda x:x[0][0])
-    df_transcript2['genomicEnd'] = df_transcript2['genomicLocs'].apply(lambda x:x[-1][1])
-    return df_transcript2
 
 def get_df_transcript2(file_gtf, file_proteins, file_genome, cpu_counts):
     '''
@@ -206,18 +161,86 @@ def get_df_transcript2(file_gtf, file_proteins, file_genome, cpu_counts):
     '''
     
     # get df_gtf
-    df_gtf = parse_gtf_gencode(file_gtf)
+    df_gtf = parse_gtf_refseq(file_gtf)
+    
+    # get df_protein
+    df_protein = parse_proteins_refseq(file_proteins)
+    
+    # get genome DNA sequences
+    df_chrom = parse_genome(file_genome)
+    print('finish reading genome file')
+    
+    # change df_gtf seqname to df_chrom chromosome names
+    dc_seqname2chr = dict(zip(df_chrom.index, df_chrom['chr']))
+    df_gtf['seqname'] = df_gtf['seqname'].map(dc_seqname2chr)
+    
+    # get protein_id in df_gtf
+    protein_ids_gtf = set(df_gtf[df_gtf['protein_id'].notnull()]['protein_id'])
+    print('number of proteins from the gtf file', len(protein_ids_gtf)) 
+    
+    # some protein_id only found in the protein fasta file
+    df_transcript2 = df_protein.set_index('protein_id').copy()
     
     # get df_transcript2, with only coding genes
-    df_transcript2 = get_df_transcripts_from_df_gtf(df_gtf)
+    ## get 'seqname','gene_id', 'transcript_id', 'gene','db_xref','strand','description' from df_gtf
+    ## get df_gtf, rows with protein_id
+    tdf = df_gtf[df_gtf.protein_id.notnull()]
+    print('number of proteins grouped by chromosome and protein_id', tdf.groupby(['gene','protein_id']).ngroups)
+    ## get protein_id to transcript_id
+    tdf_p2t = pd.DataFrame(tdf.groupby(['seqname','strand','gene_id','transcript_id','protein_id']).groups.keys())
+    tdf_p2t.columns = ['seqname','strand','gene_id','transcript_id','protein_id']
+    ## 13 transcript_id is "unknown_transcript_1", should be removed. for protein_id with multiple transcript_id, keep the one in chromosomes
+    print('proteins with unknown transcript')
+    print(tdf_p2t[tdf_p2t['transcript_id'] == 'unknown_transcript_1'])# all from mitochondrial
+    tdf_p2t = tdf_p2t[tdf_p2t['transcript_id'] != 'unknown_transcript_1']
+    chromosomes = [str(i) for i in range(1,23)] + list('XYM')
+    tdc = {v:k for k,v in enumerate(chromosomes)}
+    tdf_p2t['order'] = tdf_p2t['seqname'].map(tdc)
+    tdf_p2t = tdf_p2t.sort_values(by=['protein_id','order'])
+    tdf_p2t_keep = tdf_p2t.drop_duplicates(subset=['protein_id'],keep='first')
+    tdf_p2t_keep = tdf_p2t_keep.drop('order',axis=1)
+    # add columns to df_transcript2
+    df_transcript2 = df_transcript2.merge(tdf_p2t_keep,how='left',left_index=True, right_on='protein_id')
     
-    # add AA_seq, annotated protein sequence to df_transcript2
-    df_transcript2 = addAA_seq(df_transcript2, file_proteins)
+    df_transcript2 = df_transcript2.set_index('protein_id')
     
-    # get CDSplus sequences, frame, genomicLocs, genomicStart, genomicEnd for df_transcript2
-    df_transcript2 = addCDSplus_notes(df_transcript2, df_gtf, file_genome, cpu_counts)
-    # set "transcript_id" as index
-    df_transcript2 = df_transcript2.set_index('transcript_id')
+    # df_gtf, add 'protein_id' based on 'transcript_id' if possible
+    ## keep exon and CDS
+    df_gtf_CDS = df_gtf[df_gtf['feature'] == 'CDS'].copy()
+    df_gtf_exon = df_gtf[df_gtf['feature'] == 'exon'].copy()
+    ## protein_id to transcript_id
+    tdf = df_transcript2[df_transcript2['transcript_id'].notnull()]
+    tdc = dict(zip(tdf['transcript_id'], tdf.index))
+    ## only keep transcript_ids with CDS
+    df_gtf_exon = df_gtf_exon[df_gtf_exon['transcript_id'].isin(tdc)]
+    df_gtf_exon['protein_id']= df_gtf_exon['transcript_id'].map(tdc)
+    
+    df_gtf_keep = pd.concat([df_gtf_CDS, df_gtf_exon])
+    ## only keep lines with the reight "protein_id,"transcript_id", "seqname" combination
+    groups = set(df_transcript2.groupby(["protein_id","transcript_id", "seqname"]).groups.keys())
+    df_gtf_keep2 = df_gtf_keep[df_gtf_keep.apply(lambda x:(x["protein_id"],x["transcript_id"],x["seqname"]) in groups, axis=1)].copy()
+    
+    
+    # get CDSplus sequences
+    df_gtf_group = df_gtf_keep2.groupby('protein_id')
+    
+    pool = Pool(cpu_counts)
+    results = pool.map(getCDSplus, df_gtf_group)
+    pool.close()
+    pool.join()
+    
+    tdf = pd.DataFrame(results)
+    tdf.columns = ['protein_id', 'genomicLocs']
+    df_transcript2 = df_transcript2.merge(tdf, left_index=True, right_on='protein_id', how='left')
+    print('finishing get locs and frame')
+    df_transcript2['genomicStart'] = df_transcript2['genomicLocs'].apply(lambda x:None if not isinstance(x,list) else x[0][0])
+    df_transcript2['genomicEnd'] = df_transcript2['genomicLocs'].apply(lambda x:None if not isinstance(x,list) else x[-1][1])
+    
+    
+    df_chrom = df_chrom.set_index("chr")
+    df_transcript2['CDSplus'] = df_transcript2.apply(lambda x:'' if pd.isnull(x['seqname']) else ''.join([df_chrom.loc[x['seqname'],'seq'][i:j] for i,j in x['genomicLocs']]), axis=1)
+    
+    df_transcript2 = df_transcript2.set_index('protein_id')
     return df_transcript2
 
 # assign mutations to each transcript. 
@@ -228,13 +251,36 @@ def getMutations(transcript_id):
     Note the genomicStart should be add 1, as it is index starting from 0
     '''
     r = df_transcript2.loc[transcript_id]
-    genomicStart = r['genomicStart'] + 1
-    genomicEnd = r['genomicEnd']
+    genomicLocs = r['genomicLocs']
     chromosome = r['seqname']
-    tdf = df_mutations[(df_mutations['chr'] == chromosome)]
-    tdf = tdf[(tdf['pos'] >= genomicStart) & (tdf['pos'] <= genomicEnd)]
-    return list(tdf.index)
+    results = []
+    for genomicStart, genomicEnd in genomicLocs:
+        genomicStart = genomicStart + 1
+        tdf = df_mutations[(df_mutations['chr'] == chromosome)]
+        tdf = tdf[(tdf['pos'] >= genomicStart) & (tdf['pos'] <= genomicEnd)]
+        results += list(tdf.index)
+    return results
 
+def getMutations_faster(transcript_id):
+    '''
+    given a row in df_transcript2 of transcript_id, return the index of mutations where it locates inside genomicStart and genomicEnd
+    Note the genomicStart should be add 1, as it is index starting from 0
+    '''
+    r = df_transcript2.loc[transcript_id]
+    genomicLocs = r['genomicLocs']
+    chromosome = r['seqname']
+    results = []
+    if chromosome not in dc_mutations:
+        return results
+    tdf = dc_mutations[chromosome]
+    positions = tdf['pos']
+    for genomicStart, genomicEnd in genomicLocs:
+        genomicStart = genomicStart + 1
+        insert_start = positions.searchsorted(genomicStart,side='left')
+        insert_end = positions.searchsorted(genomicEnd, side='right')
+        positions_keep = positions.iloc[insert_start:insert_end]
+        results += list(positions_keep.index)
+    return results
 
 def translateCDSplus(transcript_id):
     '''
@@ -320,17 +366,20 @@ def translateCDSplusWithMut(transcript_id):
     transcript_id is index in df_transcript3
     translate CDSplus based on CDSplus and frame, and mutations
     '''
-#    t0 = time.time()
+    #t0 = time.time()
     r = df_transcript3.loc[transcript_id]
     locs = r['genomicLocs']
     locs = getPostionsFromLocs(locs)
     CDSplus = Seq(r['CDSplus'])
     AA_seq = r['AA_seq']
     AA_ori = AA_seq
+    AA_translate = r['AA_translate']
     frame = int(r['frame'])
     strand = r['strand']
     chromosome = r['seqname']
     mutations = r['mutations']
+    #    print(time.time() - t0)
+    tdf_m = getMut(mutations, strand)
     if strand == '-':
         CDSplus = CDSplus.reverse_complement()
         locs.reverse()
@@ -343,8 +392,6 @@ def translateCDSplusWithMut(transcript_id):
     df_CDSplus['bases'] = list(CDSplus)
     df_CDSplus['chr'] = chromosome
     df_CDSplus['strand'] = strand
-#    print(time.time() - t0)
-    tdf_m = getMut(mutations, strand)
 #    print(time.time() - t0)
     # include mutation data
     df_CDSplus = df_CDSplus.merge(tdf_m, how='left', left_on = ['chr','locs', 'bases'], right_on=['chr','pos','ref'])
@@ -491,6 +538,12 @@ def translateCDSplusWithMut2(transcript_id):
         print(transcript_id, 'cannot be processed properly, please check')
         return transcript_id
 
+#file_genome = '/projectsp/f_jx76_1/xiaolong/genome/human/GRCh38/GCF_000001405.39_GRCh38.p13_genomic.fna.gz'
+#file_proteins = '/projectsp/f_jx76_1/xiaolong/genome/human/RefSeq/GCF_000001405.39/GCF_000001405.39_GRCh38.p13_protein.faa.gz'
+#file_gtf = '/projectsp/f_jx76_1/xiaolong/genome/human/RefSeq/GCF_000001405.39/GCF_000001405.39_GRCh38.p13_genomic.gtf.gz'
+#file_mutations = '/projectsp/f_jx76_1/xiaolong/genome/gnomad/20200210AF/AFmostCommon/adj.csv.gz'
+#outprefix = '/projectsp/f_jx76_1/xiaolong/2020humanRefPr/RefSeq/20200310EthnicProteins/all'
+#cpu_counts = 20
 
 description = '''output a new reference protein set by with the variants data
 file_genome: the reference genome sequence in fasta format
@@ -522,41 +575,56 @@ if __name__ == '__main__':
     
     # parse mutation file
     df_mutations = parse_mutations(file_mutations)
+    dc_mutations = {k:v for k,v in df_mutations.groupby('chr')}
+    for k in dc_mutations:
+        dc_mutations[k] = dc_mutations[k].sort_values(by = 'pos')
+    
+    chromosomes = list(dc_mutations.keys())
+    
     df_transcript2 = get_df_transcript2(file_gtf, file_proteins, file_genome, cpu_counts)
     
     # assign mutations to each transcript. 
     # add column 'mutations' to df_transcript2, which stores index on the mutations in df_mutations
     # add column 'mutations', with list of mutation index in df_mutations
     pool = Pool(cpu_counts)
-    results = pool.map(getMutations, df_transcript2.index)
+    results = pool.map(getMutations_faster, df_transcript2.index)
     pool.close()
     pool.join()
     df_transcript2['mutations'] = results
     
     # add column 'AA_translate'
+    df_transcript2['frame'] = 0
     pool = Pool(cpu_counts)
     df_transcript2['AA_translate'] = pool.map(translateCDSplus, df_transcript2.index)
     pool.close()
     pool.join()
     
+    # print some summary
+    tdf_noAA_translate = df_transcript2[df_transcript2['AA_translate'].str.len() == 0]
+    print(tdf_noAA_translate.shape[0],"AA cannot be translated from CDSplus, which are")
+    print("    ",", ".join(tdf_noAA_translate.index), "from chromosome ", ", ".join(set([str(e) for e in tdf_noAA_translate['seqname']])))
+    tdf_shorter = df_transcript2[(df_transcript2.AA_translate.str.len() < df_transcript2.AA_seq.str.len()) & (df_transcript2['AA_translate'].str.len() != 0)]
+    print("CDS translated AA shorter than provided AA:", tdf_shorter.shape[0])
+    tdf_shorter = tdf_shorter[(tdf_shorter["AA_seq"].str.len() >5) & (tdf_shorter["AA_translate"].str.len() >5)]
+    tdf_strange = tdf_shorter[tdf_shorter["AA_seq"].str[2:5] != tdf_shorter["AA_translate"].str[2:5]]
+    #tdf_strange.to_excel('temp.xlsx')
+    print("for CDS translated AA shorter than provided AA ones, ", tdf_strange.shape[0],"AA_translate do not have same reading frame. provided AA sequence are likely not from main chromosomes, do not change them")
+    strange_ids = list(tdf_strange.index)
+    tdf_shorter2 = tdf_shorter[tdf_shorter["AA_seq"].str[2:5] == tdf_shorter["AA_translate"].str[2:5]]
+    tdf_strange2 = tdf_shorter2[tdf_shorter2.AA_seq.str.len()*3 > tdf_shorter2.CDSplus.str.len()]
+    strange_ids = set(strange_ids + list(tdf_strange2.index))
+    print("CDS translated AA shorter than provided AA contains non-standard codons or from short fragements of the genome, the following proteins will be unchanged")
+    print(df_transcript2.loc[strange_ids,["seqname","strand","gene_id","protein_description"]])
+    
     # split df_transcript2 to with mutations and no_mutations
-    df_transcript_noMut = df_transcript2[df_transcript2['mutations'].apply(lambda x:len(x)==0)]#57677
-    df_transcript3 = df_transcript2[df_transcript2['mutations'].apply(lambda x:len(x)!=0)].copy()#53132
+    df_transcript_noMut = df_transcript2[df_transcript2['mutations'].apply(lambda x:len(x)==0) | df_transcript2.index.isin(strange_ids)]#52610
+    df_transcript3 = df_transcript2[~df_transcript2.index.isin(set(df_transcript_noMut.index))].copy()#60881
     
     # save df_transcript_noMut
-    ## if with AA_seq, save directly
-    df_transcript_noMutWithAA = df_transcript_noMut[df_transcript_noMut['AA_seq'].notnull()]#47459
-    df_transcript_noMutNoAA = df_transcript_noMut[df_transcript_noMut['AA_seq'].isnull()]#10218
-    
     print('transcripts with no mutations:', df_transcript_noMut.shape[0])
-    print('transcripts with no mutations, with protein sequence:', df_transcript_noMutWithAA.shape[0],', AA will be unchanged')
-    print('transcripts with no mutations, without protein sequence:', df_transcript_noMutNoAA.shape[0], ', AA is translated from the CDS frame till the first stop codon')
     
     # add AA_seq if with no AA_seq for transcript_ids without AA_seq
     print('transcripts with mutations in CDSplus:', df_transcript3.shape[0])
-    print('transcripts with mutations, {n} without protein sequence. translated from CDSplus seq'.format(n=df_transcript3.AA_seq.isnull().sum()))
-    # add AA_seq for df_transcript3 if with no AA_seq
-    df_transcript3['AA_seq'] = df_transcript3.apply(lambda x:x['AA_seq'] if pd.notnull(x['AA_seq']) else x['AA_translate'], axis=1)
     
     pool = Pool(cpu_counts)
     results = pool.map(translateCDSplusWithMut2, list(df_transcript3.index))
@@ -572,7 +640,7 @@ if __name__ == '__main__':
     df_transcript3['len_alt_AA'] = df_transcript3['new_AA'].str.len()
     
     # save mutation annotation
-    df_sum_mutations = df_transcript3[['seqname','strand','gene_id','protein_id','hgnc_id','gene_name','frameChange','stopGain', 'AA_stopGain', 'stopLoss', 'stopLoss_pos', 'n_variant_AA', 'n_deletion_AA', 'n_insertion_AA', 'variant_AA', 'insertion_AA', 'deletion_AA', 'len_ref_AA', 'len_alt_AA']]
+    df_sum_mutations = df_transcript3[['seqname','strand','gene_id','protein_description','frameChange','stopGain', 'AA_stopGain', 'stopLoss', 'stopLoss_pos', 'n_variant_AA', 'n_deletion_AA', 'n_insertion_AA', 'variant_AA', 'insertion_AA', 'deletion_AA', 'len_ref_AA', 'len_alt_AA']]
     # only keep transcripts with mutations
     df_sum_mutations = df_sum_mutations[df_sum_mutations['frameChange'] | df_sum_mutations['stopGain'] | df_sum_mutations['stopLoss'] | (df_sum_mutations['n_variant_AA'] > 0) | (df_sum_mutations['n_deletion_AA'] > 0) | (df_sum_mutations['n_insertion_AA'] > 0)]
     
@@ -585,6 +653,12 @@ if __name__ == '__main__':
     print('total AA mutations:', df_sum_mutations.n_variant_AA.sum())
     print('total AA deletions:', df_sum_mutations.n_deletion_AA.sum())
     print('total AA insertions:', df_sum_mutations.n_insertion_AA.sum())
+    print('total genes:', len(df_transcript2.gene_id.dropna().unique()))
+    print('total proteins:', df_transcript2.shape[0])
+    print('total genes with with mutations in CDSplus region:',len(df_transcript3.gene_id.dropna().unique()))
+    print('total proteins with mutations in CDSplus region:',df_transcript3.shape[0])
+    print('total genes with protein altered:',df_sum_mutations['gene_id'].unique().shape[0])
+    print('total proteins with protein altered:',df_sum_mutations.shape[0])
     
     outfilename = outprefix +'_mutations.csv'
     if not os.path.exists(os.path.dirname(outfilename)):
@@ -593,23 +667,19 @@ if __name__ == '__main__':
     
     # save protein sequences
     ## if with AA_seq, save directly
-    df_save1 = df_transcript_noMutWithAA.copy()#47459
-    df_save2 = df_transcript_noMutNoAA.copy()#10218
+    df_save1 = df_transcript_noMut.copy()#
     df_save3 = df_transcript3[~(df_transcript3['frameChange'] | df_transcript3['stopGain'] | df_transcript3['stopLoss'] | (df_transcript3['n_variant_AA'] > 0) | (df_transcript3['n_deletion_AA'] > 0) | (df_transcript3['n_insertion_AA'] > 0))].copy()
     df_save4 = df_transcript3.loc[df_sum_mutations.index].copy()
     df_save1.reset_index(inplace=True)
-    df_save2.reset_index(inplace=True)
     df_save3.reset_index(inplace=True)
     df_save4.reset_index(inplace=True)
     
     fout = open(outprefix + '_protein.fa','w')
     if df_save1.shape[0] > 0:
-        fout.write(''.join(df_save1.apply(lambda x:'>{}|{}|{}|{}|{} noMut_withAA\n{}\n'.format(x['transcript_id'], x['protein_id'], x['gene_id'], x['hgnc_id'], x['gene_name'],x['AA_seq']), axis=1)))
-    if df_save2.shape[0] > 0:
-        fout.write(''.join(df_save2.apply(lambda x:'>{}|{}|{}|{}|{} noMut_withoutAA\n{}\n'.format(x['transcript_id'], x['protein_id'], x['gene_id'], x['hgnc_id'], x['gene_name'],x['AA_translate']), axis=1)))
+        fout.write(''.join(df_save1.apply(lambda x:'>{}|{}|{}|noMut|{}\n{}\n'.format(x['protein_id'], x['transcript_id'],  x['gene_id'], x['protein_description'], x['AA_seq']), axis=1)))
     if df_save3.shape[0] > 0:
-        fout.write(''.join(df_save3.apply(lambda x:'>{}|{}|{}|{}|{} withMut_noChange\n{}\n'.format(x['transcript_id'], x['protein_id'], x['gene_id'], x['hgnc_id'], x['gene_name'],x['AA_seq']), axis=1)))
+        fout.write(''.join(df_save3.apply(lambda x:'>{}|{}|{}|withMut_noChange|{}\n{}\n'.format(x['protein_id'], x['transcript_id'],  x['gene_id'], x['protein_description'], x['AA_seq']), axis=1)))
     if df_save4.shape[0] > 0:
-        fout.write(''.join(df_save4.apply(lambda x:'>{}|{}|{}|{}|{} withMut_AAchange\n{}\n'.format(x['transcript_id'], x['protein_id'], x['gene_id'], x['hgnc_id'], x['gene_name'],x['new_AA']), axis=1)))
+        fout.write(''.join(df_save4.apply(lambda x:'>{}|{}|{}|withMut_AAchange|{}\n{}\n'.format(x['protein_id'], x['transcript_id'],  x['gene_id'], x['protein_description'], x['new_AA']), axis=1)))
     
     fout.close()
