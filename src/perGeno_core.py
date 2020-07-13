@@ -3,6 +3,9 @@ from Bio import SeqIO
 import gzip
 import os
 import time
+import pickle
+from perChrom import PerChrom
+import shutil
 
 
 def openFile(filename):
@@ -27,6 +30,23 @@ def iterTxtWithComment(filename, comment = '#'):
         if len(line) == 0:
             continue
         yield line
+
+def parseGtfAttributes(anno):
+    '''anno is the last field of a gtf file or gff3 file, return a dict by parsing the contents
+    '''
+    elements = anno.strip().strip(';').split(';')
+    elements = [e.strip() for e in elements]
+    # tdc to store values in anno
+    tdc = {}
+    for element in elements:
+        if '=' in element:
+            k,v = element.split('=')
+        else:
+            k,v = element.split(' ', maxsplit=1)
+        v = v.strip().strip('"')
+        tdc[k] = v
+    
+    return tdc
 
 
 class PerGeno(object):
@@ -83,6 +103,7 @@ class PerGeno(object):
         self.chromosomes_genome_description = None
         self.chromosomes_mutation = None
         self.chromosomes_gtf = None
+
 
     def determineInputType(self):
         '''determine datatype based on gtf/gff file
@@ -147,43 +168,50 @@ class PerGeno(object):
         protein_keyword = self.protein_keyword
         file_gtf = self.file_gtf
 
+        # check if already exist protein2chr
+        file_protein2chr = os.path.join(self.tempfolder,'protein2chr.pickle')
+        if os.path.exists(file_protein2chr):
+            print(f'protein-chromosome is already determined in file {file_protein2chr}, use previous result')
+            dc_protein2chr = pickle.load(open(file_protein2chr,'rb'))
+            return dc_protein2chr
+
         protein_ids = set([e.id for e in SeqIO.parse(openFile(file_proteins), 'fasta')])
         keyword = protein_keyword
         dc_protein2chr = {}
+        dc_protein2multipleChr = {}
         if 'GENCODE' in datatype:
             protein_ids = set([e.split('|')[1] for e in protein_ids])
         
         for line in iterTxtWithComment(file_gtf):
             es = line.split('\t')
-            chromosome, anno = es[0], es[-1]
-            elements = anno.strip(';').split(';')
-            elements = [e.strip() for e in elements]
-            for element in elements:
-                if keyword in element:
-                    if '=' in element:
-                        protein_id = element.split('=')[1]
-                    else:
-                        protein_id = element.split(' ', maxsplit=1)[1].strip('"')
-                    if protein_id in protein_ids:
+            chromosome, feature, anno = es[0], es[2], es[-1]
+            if feature != 'CDS':
+                continue
+            
+            tdc = parseGtfAttributes(anno)
+            if keyword in tdc:
+                protein_id = tdc[keyword]
+                if protein_id in protein_ids:
+                    if protein_id not in dc_protein2chr:
                         dc_protein2chr[protein_id] = chromosome
-        
-        if len(dc_protein2chr) == 0:# if "Parent not in attribute field of gtf"
-            keyword = 'protein_id'
-        
-        for line in iterTxtWithComment(file_gtf):
-            es = line.split('\t')
-            chromosome, anno = es[0], es[-1]
-            elements = anno.strip(';').split(';')
-            elements = [e.strip() for e in elements]
-            for element in elements:
-                if keyword in element:
-                    if '=' in element:
-                        protein_id = element.split('=')[1]
                     else:
-                        protein_id = element.split(' ', maxsplit=1)[1].strip('"')
-                    if protein_id in protein_ids:
-                        dc_protein2chr[protein_id] = chromosome
+                        if chromosome != dc_protein2chr[protein_id]:
+                            if protein_id not in dc_protein2multipleChr:
+                                dc_protein2multipleChr[protein_id] = {dc_protein2chr[protein_id]}
+                            dc_protein2multipleChr[protein_id].add(chromosome)
         
+        if len(dc_protein2multipleChr) != 0:
+            print(len(dc_protein2multipleChr), 'proteins exist in more than one chromosome, use the first chromosome in the gtf file. Choose a different protein_keyword if this is not the desired behavior. Current protein_keyword is', protein_keyword, '\nThose proteins in multiple chromosomes are:')
+            for k,v in dc_protein2multipleChr.items():
+                print(k,v)
+        
+        if len(dc_protein2chr) == 0:
+            print('cannot determine chromosome for proteins based on protein_keyword:', protein_keyword)
+
+        # write dc_protein2chr, as a checkpoint file
+        with open(file_protein2chr,'wb') as f:
+            pickle.dump(dc_protein2chr, f, protocol=4)
+
         return dc_protein2chr
 
     def splitGenomeByChromosomes(self):
@@ -192,14 +220,27 @@ class PerGeno(object):
         file_genome = self.file_genome
         tempfolder = self.tempfolder
 
+        # check if genome is already splitted
+        file_splitGenomeFinished = os.path.join(self.tempfolder,'splitGenomeFinished.pickle')
+        if os.path.exists(file_splitGenomeFinished):
+            print(f'chromosome is already splitted. info stored in {file_splitGenomeFinished}, use previous result')
+            chromosomes_genome, chromosomes_genome_description = pickle.load(open(file_splitGenomeFinished,'rb'))
+            return chromosomes_genome, chromosomes_genome_description
+
         chromosomes_genome = []
         chromosomes_genome_description = []
         for e in SeqIO.parse(openFile(file_genome),'fasta'):
             chromosomes_genome.append(e.id)
             chromosomes_genome_description.append(e.description)
             tf = os.path.join(tempfolder,e.id + '.genome.fa')
-            open(tf, 'w').write('>{}\n{}\n'.format(e.id, str(e.seq).strip('*')))
+            open(tf, 'w').write('>{}\n{}\n'.format(e.description, str(e.seq).strip('*')))
         print('finish splitting the genome file')
+
+        # add checkpoint file
+        with open(file_splitGenomeFinished,'wb') as f:
+            pickle.dump([chromosomes_genome, chromosomes_genome_description], f, protocol=4)
+
+
         return chromosomes_genome, chromosomes_genome_description
 
     def splitProteinByChromosomes(self,dc_protein2chr):
@@ -294,25 +335,105 @@ class PerGeno(object):
         
         for line in iterTxtWithComment(file_gtf):
             es = line.strip().split('\t')
-            chromosome = es[0]
-            feature = es[2]
-            elements = es[-1].strip(';').split(';')
-            elements = [e.strip() for e in elements]
-            protein_ID = False
-            for element in elements:
-                if protein_keyword in element:
-                    if '=' in element:
-                        protein_ID = element.split('=')[1]
-                    else:
-                        protein_ID = element.split(' ', maxsplit=1)[1].strip('"')
-            if chromosome not in dc_files:
-                tf = os.path.join(tempfolder, chromosome + '.gtf')
-                dc_files[chromosome] = open(tf,'w')
+            chromosome, feature, anno = es[0], es[2], es[-1]
+            if feature not in features_keep:
+                continue
             
-            if feature in features_keep and protein_ID:
+            # parse anno
+            tdc = parseGtfAttributes(anno)
+
+            if protein_keyword in tdc:
+                protein_ID = tdc[protein_keyword]
                 if protein_ID in dc_protein2chr:
-                    es[-1] = protein_ID
-                    dc_files[chromosome].write('\t'.join(es) + '\n')
+                    if dc_protein2chr[protein_ID] == chromosome:
+                        # create output file if not exist
+                        if chromosome not in dc_files:
+                            tf = os.path.join(tempfolder, chromosome + '.gtf')
+                            dc_files[chromosome] = open(tf,'w')
+                        es[-1] = protein_ID
+                        dc_files[chromosome].write('\t'.join(es) + '\n')
+        
+        for chromosome in dc_files:
+            chromosomes_gtf.append(chromosome)
+            dc_files[chromosome].close()
+        print('finish splitting the gtf file')
+        return chromosomes_gtf
+
+
+    def getTranscript2ProteinRefSeq(self, dc_protein2chr):
+        '''RefSeq, return dictionary of transcript to protein
+        same proteins may exist in multiple chromosomes and each chromosome have different transcript_id, only keep the first chromosome in gtf file and the transcript_id in the first chromosome
+        '''
+        file_gtf = self.file_gtf
+        protein_keyword = self.protein_keyword
+        
+        # check if already exist protein2chr
+        file_protein2chr = os.path.join(self.tempfolder,'protein2chr.pickle')
+        if os.path.exists(file_protein2chr):
+            print(f'protein-chromosome is already determined in file {file_protein2chr}, use previous result')
+            dc_protein2chr = pickle.load(open(file_protein2chr,'rb'))
+            return dc_protein2chr
+        
+        # get transcript2protein
+        dc_transcript2protein = {}
+
+        for line in iterTxtWithComment(file_gtf):
+            es = line.split('\t')
+            chromosome, feature, anno = es[0], es[2], es[-1]
+            if feature != 'CDS':
+                continue
+            tdc = parseGtfAttributes(anno)
+            if protein_keyword in tdc:
+                if 'transcript_id' in tdc:
+                    if 'unknown_transcript' not in tdc['transcript_id']:
+                        if dc_protein2chr[tdc[protein_keyword]] == chromosome:
+                            dc_transcript2protein[tdc['transcript_id']] = tdc[protein_keyword]
+                    else:
+                        print('''RefSeq abnormal transcript_id "{}" for "{}"'''.format(tdc['transcript_id'], tdc[protein_keyword]))
+        
+        # write dc_protein2chr, as a checkpoint file
+        with open(file_protein2chr,'wb') as f:
+            pickle.dump(df, f, protocol=4)
+        
+        return dc_transcript2protein
+
+    def splitGtfByChromosomesRefSeq(self,dc_protein2chr, dc_transcript2protein):
+        '''split gtf file based on chromosome. only keep proteins in file_protein.
+        For RefSeq, same proteins may exist in multiple chromosomes and each chromosome have different transcript_id, only keep the first chromosome in gtf file and the transcript_id in the first chromosome
+        '''
+        file_gtf = self.file_gtf
+        tempfolder = self.tempfolder
+        protein_keyword = self.protein_keyword
+
+        chromosomes_gtf = []
+        dc_files = {}
+        features_keep = ['CDS', 'exon']
+        
+        for line in iterTxtWithComment(file_gtf):
+            es = line.strip().split('\t')
+            chromosome, feature, anno = es[0], es[2], es[-1]
+            # filter based on feature
+            if feature not in features_keep:
+                continue
+
+            tdc = parseGtfAttributes(anno)
+            # for add protein_ID for exon rows
+            if 'transcript_id' in tdc and protein_keyword not in tdc:
+                transcript_id = tdc['transcript_id']
+                if transcript_id in dc_transcript2protein:
+                    tdc[protein_keyword] = dc_transcript2protein[transcript_id]
+            
+            if protein_keyword in tdc:
+                protein_ID = tdc[protein_keyword]
+                if protein_ID in dc_protein2chr:
+                    if dc_protein2chr[protein_ID] == chromosome:
+                        # create output file if not exist
+                        if chromosome not in dc_files:
+                            tf = os.path.join(tempfolder, chromosome + '.gtf')
+                            dc_files[chromosome] = open(tf,'w')
+                        es[-1] = protein_ID
+                        dc_files[chromosome].write('\t'.join(es) + '\n')
+        
         for chromosome in dc_files:
             chromosomes_gtf.append(chromosome)
             dc_files[chromosome].close()
@@ -337,12 +458,107 @@ class PerGeno(object):
         self.chromosomes_mutation = self.splitMutationByChromosome()
         
         # split gtf
-        self.chromosomes_gtf = self.splitGtfByChromosomes(dc_protein2chr)
+        if self.datatype != 'RefSeq':
+            self.chromosomes_gtf = self.splitGtfByChromosomes(dc_protein2chr)
+        else:
+            dc_transcript2protein = self.getTranscript2ProteinRefSeq(dc_protein2chr)
+            self.chromosomes_gtf = self.splitGtfByChromosomesRefSeq(dc_protein2chr, dc_transcript2protein)
 
         self.chromosomes = self.chromosomes_protein
         print('number of chromosomes with proteins:', len(self.chromosomes))
         return None
     
+    def runSinglePerChrom(self, chromosome):
+        '''run perChrom for single chromosome
+        '''
+        fchr_genome = os.path.join(self.tempfolder, chromosome + '.genome.fa')
+        fchr_gtf = os.path.join(self.tempfolder, chromosome + '.gtf')
+        fchr_mutations = os.path.join(self.tempfolder, chromosome + '.mutation.tsv')
+        fchr_protein = os.path.join(self.tempfolder, chromosome + '.proteins.fa')
+
+        # check if perChrom already run
+        file_perChromFinished = os.path.join(self.tempfolder, chromosome + '.perChromFinished')
+        if os.path.exists(file_perChromFinished):
+            print('perChrom is already finished for chromosome', chromosome)
+            return chromosome
+
+        # check if all files exists
+        if not os.path.exists(fchr_genome):
+            print(chromosome, 'genome file not found. Proteins will be unchanged.')
+            return None
+        if not os.path.exists(fchr_gtf):
+            print(chromosome, 'gtf file not found. Proteins will be unchanged.')
+            return None
+        if not os.path.exists(fchr_mutations):
+            print(chromosome, 'mutation file not found. Proteins will be unchanged.')
+            return None
+        if not os.path.exists(fchr_protein):
+            print(chromosome, 'protein file not found. Proteins will be unchanged.')
+            return None
+        
+        # run PerChrom
+        print('started running perChrom for chromosome:', chromosome)
+        outprefix = os.path.join(self.tempfolder, chromosome)
+        perchrom = PerChrom(file_genome = fchr_genome,
+                    file_gtf = fchr_gtf,
+                    file_mutations = fchr_mutations,
+                    file_protein = fchr_protein,
+                    threads = self.threads,
+                    outprefix = outprefix,
+                    datatype = self.datatype,
+                    chromosome = chromosome)
+
+        # run perChrom
+        try:
+            perchrom.run_perChrom()
+            print('finished running perChrom for chromosome:', chromosome)
+            open(file_perChromFinished,'w').write(str(chromosome))
+            return chromosome
+        except:
+            print('cannot run perChrom for chromosome', chromosome, 'Proteins will be unchanged.')
+            return None
+        
+        return None
+
+
+    def runPerChom(self):
+        '''run perChrom for all chromosomes
+        '''
+        chromosomes = self.chromosomes
+        # run perChrom
+        chromosomes_mutated = [self.runSinglePerChrom(e) for e in chromosomes]
+        # successful chromosomes
+        chromosomes_mutated = [e for e in chromosomes_mutated if e is not None]
+        # failed chromosomes
+        chromosomes_unchanged = [e for e in chromosomes if e not in chromosomes_mutated]
+        # collect mutation annotations
+        files_mutAnno = ['{}/{}.aa_mutations.csv'.format(self.tempfolder, chromosome) for chromosome in chromosomes_mutated]
+        file_mutAnno = self.outprefix + '.pergeno.aa_mutations.csv'
+        df_mutAnno = pd.concat([pd.read_csv(f, sep='\t') for f in files_mutAnno], ignore_index=True)
+        print('total number of proteins with AA mutation:', df_mutAnno.shape[0])
+        df_mutAnno.to_csv(file_mutAnno, sep='\t', index=None)
+
+        # collect protein sequences
+        files_proteins_changed = ['{}/{}.mutated_protein.fa'.format(self.tempfolder, chromosome) for chromosome in chromosomes_mutated]
+        files_proteins_unchanged = ['{}/{}.proteins.fa'.format(self.tempfolder, chromosome) for chromosome in chromosomes_unchanged] + [os.path.join(self.tempfolder, 'not_in_genome.proteins.fa')]
+        file_proteins_changed = self.outprefix + '.pergeno.protein_changed.fa'
+        file_proteins_all = self.outprefix + '.pergeno.protein_all.fa'
+        fout_proteins_changed = open(file_proteins_changed, 'w')
+        fout_proteins_all = open(file_proteins_all, 'w')
+        for f in files_proteins_changed + files_proteins_unchanged:
+            for s in SeqIO.parse(f,'fasta'):
+                fout_proteins_all.write('>{}\n{}\n'.format(s.description, str(s.seq)))
+                if s.description.endswith('\tchanged'):
+                    fout_proteins_changed.write('>{}\n{}\n'.format(s.description, str(s.seq)))
+        
+        fout_proteins_changed.close()
+        fout_proteins_all.close()
+        
+        # clear temp folder
+        shutil.rmtree(self.tempfolder)
+
+        print('perGeno finished!')
+
 
 
 description = '''PerGeno, personal proteogenomic tools which outputs a new reference protein based on the variants data
@@ -352,11 +568,11 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('-g','--genome', help = 'the reference genome sequence in fasta format. It can be a gzip file', required=True)
-    parser.add_argument('-f', '--gtf', help='gtf file with CDS and exon annotations', required=True)
+    parser.add_argument('-f', '--gtf', help='gtf file with CDS and exon annotations. It can be a gzip file', required=True)
     parser.add_argument('-m', '--mutations', help='a file stores the variants', required=True)
     parser.add_argument('-p','--protein', help = 'protein sequences in fasta format. It can be a gzip file. Only proteins in this file will be checked', required=True)
     parser.add_argument('-t', '--threads', help='number of threads/CPUs to run the program. default, use all CPUs available', type=int, default=os.cpu_count())
-    parser.add_argument('-o', '--out', help='''output prefix. two file will be output. One is the annotation for mutated transcripts, one is the protein sequences. {out}_mutations.csv, {out}_protein.fa. default "perGeno" ''', default="perGeno")
+    parser.add_argument('-o', '--out', help='''output prefix. two file will be output. One is the annotation for mutated transcripts, one is the protein sequences. {out}.mutations.csv, {out}.protein.fa. default "perGeno" ''', default="perGeno")
     parser.add_argument('-a', '--datatype', help='''input datatype, could be GENCODE, RefSeq or gtf. default "gtf" ''', default='gtf', type=str, choices=['GENCODE_GTF', 'GENCODE_GFF3','RefSeq','gtf'])
     parser.add_argument('-k','--protein_keyword', help='''field name in attribute column of gtf file to determine ids for proteins. default "auto", determine the protein_keyword based on datatype. "transcript_id" for GENCODE_GTF, "protein_id" for "RefSeq" and "Parent" for gtf and GENCODE_GFF3 ''', default='auto')
     f = parser.parse_args()
@@ -371,6 +587,7 @@ if __name__ == '__main__':
     protein_keyword = f.protein_keyword
     
     pergeno = PerGeno(file_genome = file_genome, file_gtf=file_gtf, file_mutations = file_mutations, file_protein=file_protein, threads=threads, outprefix=outprefix, datatype=datatype, protein_keyword=protein_keyword)
-    print(pergeno.__dict__)
+    #print(pergeno.__dict__)
     pergeno.splitInputByChromosomes()
-    print(pergeno.__dict__)
+    #print(pergeno.__dict__)
+    pergeno.runPerChom()

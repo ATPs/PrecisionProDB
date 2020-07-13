@@ -216,7 +216,7 @@ def get_df_transcript2(file_gtf, file_proteins, file_genome, cpu_counts):
     df_gtf_exon['protein_id']= df_gtf_exon['transcript_id'].map(tdc)
     
     df_gtf_keep = pd.concat([df_gtf_CDS, df_gtf_exon])
-    ## only keep lines with the reight "protein_id,"transcript_id", "seqname" combination
+    ## only keep lines with the right "protein_id,"transcript_id", "seqname" combination
     groups = set(df_transcript2.groupby(["protein_id","transcript_id", "seqname"]).groups.keys())
     df_gtf_keep2 = df_gtf_keep[df_gtf_keep.apply(lambda x:(x["protein_id"],x["transcript_id"],x["seqname"]) in groups, axis=1)].copy()
     

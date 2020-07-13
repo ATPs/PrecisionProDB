@@ -20,7 +20,7 @@ def openFile(filename):
 
 def parse_proteins(file_proteins):
     '''
-    return a dataframe with file_proteins
+    return a dataframe with file_proteins. file_proteins is processed by perGeno, with '\t' to separate protein_id and original description
     '''
     # get protein sequences
     if file_proteins.endswith('.gz'):
@@ -34,7 +34,7 @@ def parse_proteins(file_proteins):
 
 def parse_genome(file_genome):
     '''
-    file_genome can be a gzip file
+    file_genome can be a gzip file. It should be a fasta file
     given a genome file, return a string of sequences
     '''
     chromsome_seq = SeqIO.read(openFile(file_genome), 'fasta')
@@ -43,7 +43,7 @@ def parse_genome(file_genome):
 
 def getCDSplus(tdf):
     '''
-    dc_chrom is the dict of genomic DNA
+    tdf is (transcript_id, tdf)
     given a transcript_id, get the DNA_seq based on the gtf annotation
     dcgtf_transcript is a dict with transcript_id as key, and gtf dataframe for that transcript as value
     '''
@@ -51,9 +51,10 @@ def getCDSplus(tdf):
     tdf = tdf[tdf['feature'].isin(['exon','CDS'])]
     strand = tdf['strand'].iloc[0]
     if strand =='+':
-        tdf = tdf.sort_values(by='start')# sort by location from small to large if positive strand
+        tdf = tdf.sort_values(by=['start','end'])# sort by location from small to large if positive strand
     else:
         tdf = tdf.sort_values(by='start', ascending=False) #negative strand, from large to small
+    
     # remove rows before the first exon till the first CDS, then remove all CDS
     keep = []
     for i in range(tdf.shape[0]):
@@ -63,13 +64,27 @@ def getCDSplus(tdf):
             keep.append(True)
             frame = tdf.iloc[i]['frame']
             break
-    tdf = tdf.iloc[i:]
-    tlocs_all = [(i-1,j) for i,j in zip(tdf['start'], tdf['end'])]# all locs of exon and CDS starting from the first CDS
-    tlocs = []# remove duplicates
-    for loc in tlocs_all:
-        if loc not in tlocs:
-            tlocs.append(loc)
-    
+    # cases that only with CDS annotations
+    if 'exon' not in set(tdf['feature']):
+        tlocs = [[i-1,j] for i,j in zip(tdf['start'], tdf['end'])]# all locs of CDS
+    else:
+        for j in range(i+1, tdf.shape[0]):
+            if tdf.iloc[j]['feature'] == 'CDS':
+                keep.append(False)
+            else:
+                if strand == '+':
+                    if tdf.iloc[j]['start'] >= tdf.iloc[i]['end']:
+                        keep.append(True)
+                    else:
+                        keep.append(False)
+                else:
+                    if tdf.iloc[j]['end'] <= tdf.iloc[i]['start']:
+                        keep.append(True)
+                    else:
+                        keep.append(False)
+        tdf = tdf[keep]
+        tlocs = [[i-1,j] for i,j in zip(tdf['start'], tdf['end'])]
+
     tlocs = sorted(tlocs, key=lambda x:x[0]) # sort by location from small to large
     return transcript_id, frame, tlocs
     
@@ -183,7 +198,6 @@ def getMutations(transcript_id):
     '''
     r = df_transcript2.loc[transcript_id]
     genomicLocs = r['genomicLocs']
-    chromosome = r['seqname']
     results = []
     tdf = df_mutations
     for genomicStart, genomicEnd in genomicLocs:
@@ -548,7 +562,7 @@ if __name__ == '__main__':
     parser.add_argument('-f', '--gtf', help='gtf file with CDS and exon annotations', required=True)
     parser.add_argument('-m', '--mutations', help='a file stores the variants', required=True)
     parser.add_argument('-t', '--threads', help='number of threads/CPUs to run the program. default, use all CPUs available', type=int, default=os.cpu_count())
-    parser.add_argument('-o', '--out', help='output prefix. two file will be output. One is the annotation for mutated transcripts, one is the protein sequences. {out}_mutations.csv, {out}_protein.fa')
+    parser.add_argument('-o', '--out', help='output prefix. two file will be output. One is the annotation for mutated transcripts, one is the protein sequences. {out}.aa_mutations.csv, {out}.mutated_protein.fa')
     parser.add_argument('-c', '--chromosome', help='''chromosome name/id, default="chr1" ''', default='chr1', type=str)
     parser.add_argument('-d', '--datatype', help='''input datatype. choice of 'GENCODE_GTF','GENCODE_GFF3', 'RefSeq', 'gtf', default 'GENCODE_GTF' ''', type=str, choices=['GENCODE_GTF','GENCODE_GFF3', 'RefSeq', 'gtf'], default='GENCODE_GTF')
     
@@ -615,7 +629,8 @@ if __name__ == '__main__':
     
     # get sequence length of ref_AA and alt_AA
     df_transcript3['len_ref_AA'] = df_transcript3['AA_seq'].str.len()
-    df_transcript3['len_alt_AA'] = df_transcript3['new_AA'].str.len()
+    if 'new_AA' in df_transcript3.columns:
+        df_transcript3['len_alt_AA'] = df_transcript3['new_AA'].str.len()
     
     # save mutation annotation
     columns_keep = ['seqname','strand','frameChange','stopGain', 'AA_stopGain', 'stopLoss', 'stopLoss_pos', 'nonStandardStopCodon', 'n_variant_AA', 'n_deletion_AA', 'n_insertion_AA', 'variant_AA', 'insertion_AA', 'deletion_AA', 'len_ref_AA', 'len_alt_AA']
