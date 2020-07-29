@@ -87,6 +87,8 @@ class PerChrom(object):
         df_protein = pd.DataFrame([[seq.id, seq.description.split('\t',maxsplit=1)[1], str(seq.seq).strip('*')] for seq in tls])#remvoe '*' which represent stop codons
         df_protein.columns = ['protein_id','protein_description', 'AA_seq']
         print('from the protein file, totally', len(tls), 'protein sequences.')
+        df_protein['protein_id_fasta'] = df_protein['protein_description'].apply(lambda x:x.split()[0])
+        df_protein['protein_anno'] = df_protein.apply(lambda x:x['protein_description'].split(maxsplit=1)[-1] if x['protein_description'].split(maxsplit=1)[-1] != x['protein_id_fasta'] else '', axis=1)
         return df_protein
 
     def parse_genome(self):
@@ -692,7 +694,7 @@ class PerChrom(object):
             df_transcript3['len_alt_AA'] = df_transcript3['new_AA'].str.len()
         
         # save mutation annotation
-        columns_keep = ['seqname','strand','frameChange','stopGain', 'AA_stopGain', 'stopLoss', 'stopLoss_pos', 'nonStandardStopCodon', 'n_variant_AA', 'n_deletion_AA', 'n_insertion_AA', 'variant_AA', 'insertion_AA', 'deletion_AA', 'len_ref_AA', 'len_alt_AA']
+        columns_keep = ['protein_id_fasta', 'seqname', 'strand','frameChange','stopGain', 'AA_stopGain', 'stopLoss', 'stopLoss_pos', 'nonStandardStopCodon', 'n_variant_AA', 'n_deletion_AA', 'n_insertion_AA', 'variant_AA', 'insertion_AA', 'deletion_AA', 'len_ref_AA', 'len_alt_AA']
         columns_keep = [e for e in columns_keep if e in df_transcript3.columns]
         df_sum_mutations = df_transcript3[df_transcript3['AA_seq'] != df_transcript3['new_AA']][columns_keep]
         
@@ -707,7 +709,7 @@ class PerChrom(object):
         for protein_id, r in df_transcript_noMut.iterrows():
             fout.write('>{}\tunchanged\n{}\n'.format(r['protein_description'], r['AA_seq']))
         for protein_id, r in df_transcript3.iterrows():
-            if pd.notnull(r['new_AA']):
+            if pd.notnull(r['new_AA']) and r['new_AA'] != r['AA_seq']:
                 fout.write('>{}\tchanged\n{}\n'.format(r['protein_description'], r['new_AA']))
             else:
                 fout.write('>{}\tunchanged\n{}\n'.format(r['protein_description'], r['AA_seq']))
