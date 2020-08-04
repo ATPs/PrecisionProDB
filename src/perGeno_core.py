@@ -86,7 +86,7 @@ class PerGeno(object):
                 self.protein_keyword = 'transcript_id'
             elif self.datatype == 'GENCODE_GFF3':
                 self.protein_keyword = 'Parent'
-            elif self.datatype == 'RefSeq':
+            elif self.datatype == 'RefSeq' or self.datatype == 'Ensembl_GTF':
                 self.protein_keyword = 'protein_id'
             else:
                 self.protein_keyword = 'Parent'
@@ -124,6 +124,12 @@ class PerGeno(object):
             datatype = 'RefSeq'
             print('input data is provided as from RefSeq')
             return datatype
+        if datatype.upper() == 'ENSEMBL_GTF':
+            datatype = 'Ensembl_GTF'
+            print('input data is provided as from Ensembl_GTF. Note: for some Ensembl models, the protein sequences are not translated based on GTF annotation. Those sequences will be ignored.')
+            return datatype
+        
+        print('datatype is not provided. Try to infer datatype. Note: Ensembl datatype cannot be inferred.')
 
         f = openFile(file_gtf)
         annotations = ''
@@ -181,6 +187,8 @@ class PerGeno(object):
         dc_protein2multipleChr = {}
         if 'GENCODE' in datatype:
             protein_ids = set([e.split('|')[1] for e in protein_ids])
+        if datatype == 'Ensembl_GTF':
+            protein_ids = set([e.split('.')[0] for e in protein_ids])
         
         for line in iterTxtWithComment(file_gtf):
             es = line.split('\t')
@@ -257,6 +265,8 @@ class PerGeno(object):
         for seq in SeqIO.parse(openFile(file_protein),'fasta'):
             if 'GENCODE' in datatype:# use transcript_id as protein_id
                 protein_id = seq.id.split('|')[1]
+            elif datatype == 'Ensembl_GTF':
+                protein_id = seq.id.split('.')[0]
             else:
                 protein_id = seq.id
             if protein_id in dc_protein2chr:
@@ -573,7 +583,7 @@ if __name__ == '__main__':
     parser.add_argument('-p','--protein', help = 'protein sequences in fasta format. It can be a gzip file. Only proteins in this file will be checked', required=True)
     parser.add_argument('-t', '--threads', help='number of threads/CPUs to run the program. default, use all CPUs available', type=int, default=os.cpu_count())
     parser.add_argument('-o', '--out', help='''output prefix. Three files will be saved, including the annotation for mutated transcripts, the mutated or all protein sequences. {out}.pergeno.aa_mutations.csv, {out}.pergeno.protein_all.fa, {out}.protein_changed.fa. default "perGeno" ''', default="perGeno")
-    parser.add_argument('-a', '--datatype', help='''input datatype, could be GENCODE_GTF, GENCODE_GFF3, RefSeq or gtf. default "gtf" ''', default='gtf', type=str, choices=['GENCODE_GTF', 'GENCODE_GFF3','RefSeq','gtf'])
+    parser.add_argument('-a', '--datatype', help='''input datatype, could be GENCODE_GTF, GENCODE_GFF3, RefSeq, Ensembl_GTF or gtf. default "gtf". perGeno does not support Ensembl GFF3 ''', default='gtf', type=str, choices=['GENCODE_GTF', 'GENCODE_GFF3','RefSeq','Ensembl_GTF','gtf'])
     parser.add_argument('-k','--protein_keyword', help='''field name in attribute column of gtf file to determine ids for proteins. default "auto", determine the protein_keyword based on datatype. "transcript_id" for GENCODE_GTF, "protein_id" for "RefSeq" and "Parent" for gtf and GENCODE_GFF3 ''', default='auto')
     f = parser.parse_args()
     

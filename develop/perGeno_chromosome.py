@@ -564,7 +564,7 @@ if __name__ == '__main__':
     parser.add_argument('-t', '--threads', help='number of threads/CPUs to run the program. default, use all CPUs available', type=int, default=os.cpu_count())
     parser.add_argument('-o', '--out', help='output prefix. two file will be output. One is the annotation for mutated transcripts, one is the protein sequences. {out}.aa_mutations.csv, {out}.mutated_protein.fa')
     parser.add_argument('-c', '--chromosome', help='''chromosome name/id, default="chr1" ''', default='chr1', type=str)
-    parser.add_argument('-d', '--datatype', help='''input datatype. choice of 'GENCODE_GTF','GENCODE_GFF3', 'RefSeq', 'gtf', default 'GENCODE_GTF' ''', type=str, choices=['GENCODE_GTF','GENCODE_GFF3', 'RefSeq', 'gtf'], default='GENCODE_GTF')
+    parser.add_argument('-a', '--datatype', help='''input datatype, could be GENCODE_GTF, GENCODE_GFF3, RefSeq, Ensembl_GTF or gtf. default "gtf". perGeno does not support Ensembl GFF3 ''', default='gtf', type=str, choices=['GENCODE_GTF', 'GENCODE_GFF3','RefSeq','Ensembl_GTF','gtf'])
     
     f = parser.parse_args()
     
