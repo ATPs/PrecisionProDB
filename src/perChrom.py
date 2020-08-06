@@ -696,7 +696,7 @@ class PerChrom(object):
         # save mutation annotation
         columns_keep = ['protein_id_fasta', 'seqname', 'strand','frameChange','stopGain', 'AA_stopGain', 'stopLoss', 'stopLoss_pos', 'nonStandardStopCodon', 'n_variant_AA', 'n_deletion_AA', 'n_insertion_AA', 'variant_AA', 'insertion_AA', 'deletion_AA', 'len_ref_AA', 'len_alt_AA']
         columns_keep = [e for e in columns_keep if e in df_transcript3.columns]
-        df_sum_mutations = df_transcript3[df_transcript3['AA_seq'] != df_transcript3['new_AA']][columns_keep]
+        df_sum_mutations = df_transcript3[(df_transcript3['AA_seq'] != df_transcript3['new_AA']) & (pd.notnull(df_transcript3['new_AA']))][columns_keep]
         
         outfilename = outprefix +'.aa_mutations.csv'
         if not os.path.exists(os.path.dirname(outfilename)):
