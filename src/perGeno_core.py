@@ -6,6 +6,7 @@ import time
 import pickle
 from perChrom import PerChrom
 import shutil
+import re
 
 
 def openFile(filename):
@@ -156,9 +157,17 @@ class PerGeno(object):
                 return datatype
         if 'NCBI Homo sapiens'.lower() in annotations:
             datatype = 'RefSeq'
-            print('input data is from NCBI Homo sapiens RefSeq')
+            print('input data is inferred as from NCBI Homo sapiens RefSeq')
             return datatype
         
+
+        # try to check if Ensembl
+        line1 = f.readline()
+        if re.findall('''gene_id "ENSG\d*";''', line1):
+            datatype = 'Ensembl_GTF'
+            print('input data is inferred as from Ensembl_GTF. Use with caution!')
+            return datatype
+
         datatype = 'gtf'
         print('input data is general gtf')
         return datatype
@@ -555,12 +564,16 @@ class PerGeno(object):
         file_proteins_all = self.outprefix + '.pergeno.protein_all.fa'
         fout_proteins_changed = open(file_proteins_changed, 'w')
         fout_proteins_all = open(file_proteins_all, 'w')
-        for f in files_proteins_changed + files_proteins_unchanged:
+        for f in files_proteins_changed:
             for s in SeqIO.parse(f,'fasta'):
                 fout_proteins_all.write('>{}\n{}\n'.format(s.description, str(s.seq)))
                 if s.description.endswith('\tchanged'):
                     fout_proteins_changed.write('>{}\n{}\n'.format(s.description, str(s.seq)))
         
+        for f in files_proteins_unchanged:
+            for s in SeqIO.parse(f,'fasta'):
+                fout_proteins_all.write('>{}\tunchanged\n{}\n'.format(s.description.split('\t',1)[1], str(s.seq)))
+
         fout_proteins_changed.close()
         fout_proteins_all.close()
         
