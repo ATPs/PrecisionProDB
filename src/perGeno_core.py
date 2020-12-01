@@ -163,7 +163,7 @@ class PerGeno(object):
 
         # try to check if Ensembl
         line1 = f.readline()
-        if re.findall('''gene_id "ENSG\d*";''', line1):
+        if re.findall('''\tgene_id "ENSG\d*";''', line1):
             datatype = 'Ensembl_GTF'
             print('input data is inferred as from Ensembl_GTF. Use with caution!')
             return datatype
