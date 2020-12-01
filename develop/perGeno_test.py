@@ -84,3 +84,14 @@ cpu_counts = os.cpu_count()
 datatype = 'GENCODE'
 
 
+
+file_genome='/projectsp/f_jx76_1/xiaolong/genome/human/Ensembl/101/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz'
+file_gtf='/projectsp/f_jx76_1/xiaolong/genome/human/Ensembl/101/Homo_sapiens.GRCh38.101.gtf.gz'
+file_mutations='/projectsp/f_jx76_1/xiaolong/genome/gnomad/20201113AF3.1/AFmostCommon/adj.csv.gz'
+file_protein='/projectsp/f_jx76_1/xiaolong/genome/human/Ensembl/101/Homo_sapiens.GRCh38.pep.all.fa.gz'
+threads=8
+outprefix='pergeno'
+
+datatype='Ensembl_GTF'
+protein_keyword='auto'
+pergeno = PerGeno(file_genome = file_genome, file_gtf=file_gtf, file_mutations = file_mutations, file_protein=file_protein, threads=threads, outprefix=outprefix, datatype=datatype, protein_keyword=protein_keyword)
