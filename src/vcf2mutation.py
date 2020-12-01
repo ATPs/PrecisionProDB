@@ -63,6 +63,9 @@ def getMutationsFromVCF(file_vcf, outprefix = None, individual=None, filter_PASS
 
         alternatives = alternatives.split(',')
         genotype = genotype.split(':')[0]
+        if genotype == '.':
+            continue
+        
         if '|' in genotype:
             GTs = genotype.split('|')
         else:
