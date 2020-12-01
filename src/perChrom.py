@@ -478,7 +478,7 @@ class PerChrom(object):
                         t_alt.loc[n, 'AA_ref'] = AA_seq[n]
                         t_alt.loc[n, 'AA_alt'] = new_AA[n]
                         t_alt.loc[n, 'AA_index'] = n + 1
-                        t_alt.loc[n, 'variants'] = ','.join(df_CDSplus.loc[n*3:(n+1)*3,'variant_id'].dropna().drop_duplicates())
+                        t_alt.loc[n, 'variants'] = ','.join(df_CDSplus.iloc[n*3:(n+1)*3]['variant_id'].dropna().drop_duplicates())
                 tdc_result['n_variant_AA'] = t_alt.shape[0]
                 tdc_result['variant_AA'] = ';'.join(t_alt.apply(lambda x:x['AA_ref'] + str(int(x['AA_index'])) + x['AA_alt'] + '({})'.format(x['variants']), axis=1))
                 if frame != 0:
@@ -594,9 +594,9 @@ class PerChrom(object):
                 elif new_AA in AA_translate:
                     print(transcript_id, 'AA_translate longer than provided AA sequence, the gtf file not consistent with the protein file')
                 else:
-                    print(transcript_id,'something wrong?')
-                    print(AA_ori)
-                    print(new_AA)
+                    print(transcript_id,'something wrong, likely to be mutation in start codon?')
+                    print('input AA', AA_ori)
+                    print('translated AA', new_AA)
         
         tdc_result['new_AA'] = new_AA
         tdc_result['frameChange'] = frameChange
