@@ -98,6 +98,8 @@ def download(datatype, workfolder='.'):
         url_genome, url_GTF, url_protein = getRefSeqLatest()
     elif datatype == 'ENSEMBL':
         url_genome, url_GTF, url_protein = getEnsemblLatest()
+    elif datatype == 'UNIPROT':
+        url_genome, url_GTF, url_protein = getEnsemblLatest()
     else:
         print('other datatype is not supported now.')
         exit(0)
@@ -107,18 +109,27 @@ def download(datatype, workfolder='.'):
     os.system(f'cd {workfolder} && wget {url_genome}')
     os.system(f'cd {workfolder} && wget {url_GTF}')
     os.system(f'cd {workfolder} && wget {url_protein}')
+
+    if datatype == 'UNIPROT':
+        url_uniprot = 'ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/reference_proteomes/Eukaryota/UP000005640_9606.fasta.gz'
+        os.system(f'cd {workfolder} && wget {url_uniprot}')
+        url_uniprot_additional = 'ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/reference_proteomes/Eukaryota/UP000005640_9606_additional.fasta.gz'
+        os.system(f'cd {workfolder} && wget {url_uniprot_additional}')
+
+
     print('finished! Files saved in', workfolder)
 
 
 description = '''
 download the latest human gene models from RefSeq, GENCODE or Ensembl to run perGeno
+If datatype is "Uniprot", Ensembl and uniprot_trembl_human sequences will be downloaded.
 '''
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('-d','--datatype', help = 'RefSeq, GENCODE or Ensembl to download', required=True)
-    parser.add_argument('-o', '--out', help='output folder for the downloaded files. default: current folder', default='.')
+    parser.add_argument('-d','--datatype', help = 'RefSeq, GENCODE, Ensembl or Uniprot to download. If datatype is "Uniprot", Ensembl and uniprot_trembl_human sequences will be downloaded', required=True)
+    parser.add_argument('-o', '--out', help='output folder for the downloaded files. default: ".",current folder', default='.')
     f = parser.parse_args()
     
     datatype = f.datatype
