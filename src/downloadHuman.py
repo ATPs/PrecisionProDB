@@ -86,6 +86,19 @@ def getEnsemblLatest():
 
     return url_genome, url_GTF, url_protein
 
+def downloadFile2folder(url, workfolder):
+    '''
+    download the file from url to workfolder. print url if cannot download
+    '''
+    try:
+        basename = os.path.basename(url)
+        if os.path.exists(os.path.join(workfolder, basename)):
+            print(basename, 'already downloaded in folder', workfolder, 'and will skip')
+            return 0
+        os.system(f'cd {workfolder} && wget --retry-connrefused --waitretry=2 --read-timeout=40 --timeout=15 -t 20 {url}')
+    except:
+        print(url, 'cannot be downloaded, try to download yourself!')
+
 def download(datatype, workfolder='.'):
     '''download genome, GTF, protein sequence of {datatype} and store files in {workfolder}
     datatype can be RefSeq, GENCODE or Ensembl
@@ -106,29 +119,39 @@ def download(datatype, workfolder='.'):
     
     if not os.path.exists(workfolder):
         os.makedirs(workfolder)
-    os.system(f'cd {workfolder} && wget {url_genome}')
-    os.system(f'cd {workfolder} && wget {url_GTF}')
-    os.system(f'cd {workfolder} && wget {url_protein}')
+
+    downloadFile2folder(url_genome, workfolder)
+    downloadFile2folder(url_GTF, workfolder)
+    downloadFile2folder(url_protein, workfolder)
+    
 
     if datatype == 'UNIPROT':
         url_uniprot = 'ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/reference_proteomes/Eukaryota/UP000005640_9606.fasta.gz'
-        os.system(f'cd {workfolder} && wget {url_uniprot}')
+        downloadFile2folder(url_uniprot, workfolder)
         url_uniprot_additional = 'ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/reference_proteomes/Eukaryota/UP000005640_9606_additional.fasta.gz'
-        os.system(f'cd {workfolder} && wget {url_uniprot_additional}')
+        downloadFile2folder(url_uniprot_additional, workfolder)
+
 
 
     print('finished! Files saved in', workfolder)
+    # return path of downloaded files
+    if datatype != 'UNIPROT':
+        urls = [url_genome, url_GTF, url_protein]
+    else:
+        urls = [url_genome, url_GTF, url_protein, url_uniprot, url_uniprot_additional]
+    files_download = [os.path.join(workfolder, os.path.basename(e)) for e in urls]
+    return files_download
 
 
 description = '''
 download the latest human gene models from RefSeq, GENCODE or Ensembl to run perGeno
-If datatype is "Uniprot", Ensembl and uniprot_trembl_human sequences will be downloaded.
+If datatype is "Uniprot", Ensembl and Uniprot human sequences (UP000005640_9606, UP000005640_9606_additional) will be downloaded
 '''
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('-d','--datatype', help = 'RefSeq, GENCODE, Ensembl or Uniprot to download. If datatype is "Uniprot", Ensembl and uniprot_trembl_human sequences will be downloaded', required=True)
+    parser.add_argument('-d','--datatype', help = 'RefSeq, GENCODE, Ensembl or Uniprot to download.', required=True)
     parser.add_argument('-o', '--out', help='output folder for the downloaded files. default: ".",current folder', default='.')
     f = parser.parse_args()
     
