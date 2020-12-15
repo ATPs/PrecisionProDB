@@ -84,7 +84,7 @@ class PerChrom(object):
             tls =list(SeqIO.parse(gzip.open(file_proteins,'rt'), 'fasta'))
         else:
             tls =list(SeqIO.parse(open(file_proteins,'r'), 'fasta'))
-        df_protein = pd.DataFrame([[seq.id, seq.description.split('\t',maxsplit=1)[1], str(seq.seq).strip('*')] for seq in tls])#remvoe '*' which represent stop codons
+        df_protein = pd.DataFrame([[seq.id, seq.description.split('\t',maxsplit=1)[1], str(seq.seq).strip('*')] for seq in tls])#remove '*' which represent stop codons
         df_protein.columns = ['protein_id','protein_description', 'AA_seq']
         print('from the protein file, totally', len(tls), 'protein sequences.')
         df_protein['protein_id_fasta'] = df_protein['protein_description'].apply(lambda x:x.split()[0])
