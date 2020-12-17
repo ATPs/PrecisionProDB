@@ -92,10 +92,10 @@ def downloadFile2folder(url, workfolder):
     '''
     try:
         basename = os.path.basename(url)
-        if os.path.exists(os.path.join(workfolder, basename)):
-            print(basename, 'already downloaded in folder', workfolder, 'and will skip')
-            return 0
-        os.system(f'cd {workfolder} && wget --retry-connrefused --waitretry=2 --read-timeout=40 --timeout=15 -t 20 {url}')
+        # if os.path.exists(os.path.join(workfolder, basename)):
+        #     print(basename, 'already downloaded in folder', workfolder, 'and will skip')
+        #     return 0
+        os.system(f'cd {workfolder} && wget -c --retry-connrefused --waitretry=2 --read-timeout=40 --timeout=15 -t 20 {url}')
     except:
         print(url, 'cannot be downloaded, try to download yourself!')
 
