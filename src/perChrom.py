@@ -425,6 +425,10 @@ class PerChrom(object):
         mutations = r['mutations']
         tdf_m = self.getMut(mutations, strand)
         
+        # sometimes the AA sequences for example ENSP00000466819, is longer than the CDSplus. skip.
+        if len(AA_seq)*3 > len(CDSplus):
+            print(transcript_id, 'input protein sequences cannot be translated from the CDS sequence in gtf annotation.')
+
         if strand == '-':
             CDSplus = CDSplus.reverse_complement()
             locs.reverse()
