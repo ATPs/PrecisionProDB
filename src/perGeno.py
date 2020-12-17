@@ -1,8 +1,8 @@
 from perGeno_core import PerGeno
 from perGeno_vcf import runPerGenoVCF
 import os
-import downloadhuman
-
+import downloadHuman
+import time
 
 description = '''
 PerGeno, personal proteogenomic tools which outputs a new reference protein based on the variants data. 
@@ -42,6 +42,8 @@ if __name__ == '__main__':
     download = f.download
     files_uniprot = f.uniprot
     print(f)
+    
+    time0 = time.time()
 
     # create workfolder if not exist
     workfolder = os.path.dirname(outprefix)
@@ -55,13 +57,12 @@ if __name__ == '__main__':
     if download != '':
         print('-D --download is set to be', download, '\n')
         download = download.upper()
-        
         if download != 'UNIPROT':
             if file_genome != '' and file_gtf != '' and file_protein != '':
                 print('download already finished for', download)
                 pass
             else:
-                files_downloaded = downloadhuman.download(download, workfolder=workfolder)
+                files_downloaded = downloadHuman.download(download, workfolder=workfolder)
                 file_genome, file_gtf, file_protein = files_downloaded
                 if download == 'GENCODE':
                     datatype = 'GENCODE_GTF'
@@ -76,6 +77,7 @@ if __name__ == '__main__':
                 print('download already finished for', download)
                 pass
             else:
+                files_downloaded = downloadHuman.download(download, workfolder=workfolder)
                 file_genome, file_gtf, file_protein, file_uniprot, file_uniprot_additional = files_downloaded
                 files_uniprot = ','.join([file_uniprot, file_uniprot_additional])
                 datatype = 'Ensembl_GTF'
@@ -96,8 +98,8 @@ if __name__ == '__main__':
     # deal with uniprot
     if download == 'UNIPROT':
         print('try to extract Uniprot proteins from Ensembl models')
-        import extractmutateduniprot
-        extractmutateduniprot.extractMutatedUniprot(files_uniprot=files_uniprot, files_ref=file_protein, files_alt=outprefix + '.pergeno.protein_all.fa', outprefix=outprefix, length_min = 20)
+        import extractMutatedUniprot
+        extractMutatedUniprot.extractMutatedUniprot(files_uniprot=files_uniprot, files_ref=file_protein, files_alt=outprefix + '.pergeno.protein_all.fa', outprefix=outprefix, length_min = 20)
 
     
-    print('perGeno finished!')
+    print('perGeno finished!, total seconds:', time.time() - time0)
