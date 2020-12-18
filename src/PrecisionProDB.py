@@ -1,5 +1,5 @@
-from perGeno_core import PerGeno
-from perGeno_vcf import runPerGenoVCF
+from PrecisionProDB_core import PerGeno
+from PrecisionProDB_vcf import runPerGenoVCF
 import os
 import downloadHuman
 import time

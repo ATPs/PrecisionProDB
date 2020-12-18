@@ -2,7 +2,7 @@ import pandas as pd
 from Bio import SeqIO
 import gzip
 import os
-from perGeno_core import PerGeno
+from PrecisionProDB_core import PerGeno
 from vcf2mutation import getMutationsFromVCF
 
 def openFile(filename):
@@ -99,7 +99,7 @@ def runPerGenoVCF(
     ## save the result
     df_joined_dedup['seq_id_final'] = df_joined_dedup.apply(lambda r:r['seq_id'] + '__'+ r['batch'] if r['batch'] in ['1','2'] else r['seq_id'] +'__12',axis=1)
     f = open(fout_protein_changed,'w')
-    for row, r in df_joined_dedup.iterrows():
+    for _, r in df_joined_dedup.iterrows():
         f.write('>{}\t{}\n{}\n'.format(r['seq_id_final'], r['seq_anno'], r['seq']))
     f.close()
 

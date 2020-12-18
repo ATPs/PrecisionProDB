@@ -69,7 +69,7 @@ def extractMutatedUniprot(files_uniprot, files_ref, files_alt, outprefix, length
     fout_changed = open(file_changed,'w')
     fout_all = open(file_all, 'w')
 
-    for row, r in df2.iterrows():
+    for _, r in df2.iterrows():
         uniprot_id, uniprot_description, ref_id = r['uniprot_id'], r['uniprot_description'], r['ref_id']
         alt_seqs = list(dc_ref2alt[ref_id])
         uniprot_description = uniprot_description[len(uniprot_id):].strip()
@@ -82,7 +82,7 @@ def extractMutatedUniprot(files_uniprot, files_ref, files_alt, outprefix, length
                 fout_all.write('>{}__{} {}\tchanged\n{}\n'.format(uniprot_id,n+1, uniprot_description,alt_seq))
 
     changed_ids = set(df2['uniprot_id'])
-    for row, r in df.iterrows():
+    for _, r in df.iterrows():
         uniprot_id = r['uniprot_id']
         if uniprot_id not in changed_ids:
             uniprot_description = r['uniprot_description']

@@ -28,9 +28,9 @@ def getGENCODElatest():
     folder_latest = [e for e in folders if '/release_'+latest in e][0]
     files_latest = ftp.nlst(folder_latest)
 
-    url_genome = 'ftp://' + ftp_url + [e for e in files_latest if re.findall('GRCh38.p\d*.genome.fa.gz',e)][0]
-    url_GTF = 'ftp://' + ftp_url + [e for e in files_latest if re.findall('gencode.v\d*.chr_patch_hapl_scaff.annotation.gtf.gz',e)][0]
-    url_protein = 'ftp://' + ftp_url + [e for e in files_latest if re.findall('gencode.v\d*.pc_translations.fa.gz',e)][0]
+    url_genome = 'ftp://' + ftp_url + [e for e in files_latest if re.findall('GRCh38.p\\d*.genome.fa.gz',e)][0]
+    url_GTF = 'ftp://' + ftp_url + [e for e in files_latest if re.findall('gencode.v\\d*.chr_patch_hapl_scaff.annotation.gtf.gz',e)][0]
+    url_protein = 'ftp://' + ftp_url + [e for e in files_latest if re.findall('gencode.v\\d*.pc_translations.fa.gz',e)][0]
 
     return url_genome, url_GTF, url_protein
 
@@ -77,9 +77,9 @@ def getEnsemblLatest():
     files_GTF = ftp.nlst(folder_GTF)
     files_protein = ftp.nlst(folder_protein)
 
-    url_genome = 'ftp://' + ftp_url + [e for e in files_genome if re.findall(f'/Homo_sapiens.GRCh\d*.dna.primary_assembly.fa.gz',e)][0]
-    url_GTF = 'ftp://' + ftp_url + [e for e in files_GTF if re.findall(f'Homo_sapiens.GRCh\d*.\d*.gtf.gz',e)][0]
-    url_protein = 'ftp://' + ftp_url + [e for e in files_protein if re.findall(f'Homo_sapiens.GRCh\d*.pep.all.fa.gz',e)][0]
+    url_genome = 'ftp://' + ftp_url + [e for e in files_genome if re.findall(f'/Homo_sapiens.GRCh\\d*.dna.primary_assembly.fa.gz',e)][0]
+    url_GTF = 'ftp://' + ftp_url + [e for e in files_GTF if re.findall(f'Homo_sapiens.GRCh\\d*.\\d*.gtf.gz',e)][0]
+    url_protein = 'ftp://' + ftp_url + [e for e in files_protein if re.findall(f'Homo_sapiens.GRCh\\d*.pep.all.fa.gz',e)][0]
 
     version = os.path.basename(url_GTF).split('.')[2]
     print('Ensembl, the latest release is', version)
@@ -91,7 +91,7 @@ def downloadFile2folder(url, workfolder):
     download the file from url to workfolder. print url if cannot download
     '''
     try:
-        basename = os.path.basename(url)
+        # basename = os.path.basename(url)
         # if os.path.exists(os.path.join(workfolder, basename)):
         #     print(basename, 'already downloaded in folder', workfolder, 'and will skip')
         #     return 0

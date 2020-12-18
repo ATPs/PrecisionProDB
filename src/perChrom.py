@@ -2,10 +2,8 @@ import pandas as pd
 from Bio import SeqIO
 from Bio.Seq import Seq
 import gzip
-from io import StringIO
 import numpy as np
 from multiprocessing import Pool
-from collections import Counter
 import os
 import time
 
@@ -22,24 +20,244 @@ def f_rc(x):
     '''
     return str(Seq(x).reverse_complement())
 
-def mergeIntervals(intervals):
+
+def parse_proteins(file_proteins):
     '''
-    merge intervals
-    intervals = [[1,3],[0,3],[0,6],[0,4],[8,10],[15,18], [18,23],[22,27]]
-    return [[0, 6], [8, 10], [15, 27]]
+    return a dataframe with file_proteins. file_proteins is processed by perGeno, with '\t' to separate protein_id and original description
     '''
-    if not intervals:
-        return []
-    sorted_intervals = sorted(intervals, key=lambda x:x[0])
-    merged = [sorted_intervals[0]]
-    for i in sorted_intervals:
-        j = merged[-1]
-        if j[1] >= i[0]:
-            if j[1] < i[1]:
-                j[1] = i[1]
+    # get protein sequences
+    if file_proteins.endswith('.gz'):
+        tls =list(SeqIO.parse(gzip.open(file_proteins,'rt'), 'fasta'))
+    else:
+        tls =list(SeqIO.parse(open(file_proteins,'r'), 'fasta'))
+    df_protein = pd.DataFrame([[seq.id, seq.description.split('\t',maxsplit=1)[1], str(seq.seq).strip('*')] for seq in tls])#remove '*' which represent stop codons
+    df_protein.columns = ['protein_id','protein_description', 'AA_seq']
+    print('from the protein file, totally', len(tls), 'protein sequences.')
+    df_protein['protein_id_fasta'] = df_protein['protein_description'].apply(lambda x:x.split()[0])
+    df_protein['protein_anno'] = df_protein.apply(lambda x:x['protein_description'].split(maxsplit=1)[-1] if x['protein_description'].split(maxsplit=1)[-1] != x['protein_id_fasta'] else '', axis=1)
+    return df_protein
+
+
+def parse_mutation(file_mutations, chromosome):
+    '''parse mutation file
+    '''
+    df_mutations = pd.read_csv(file_mutations, sep='\t',low_memory=False)
+    df_mutations['pos_end'] = df_mutations['pos'] + df_mutations['ref'].str.len() -1 # add a column, 'pos_end' to include all span of the mutation in reference genome
+    df_mutations = df_mutations.sort_values(by = 'pos')
+    df_mutations['chr'] = chromosome
+    
+    return df_mutations
+
+
+def parse_genome(file_genome):
+    '''
+    file_genome can be a gzip file. It should be a fasta file
+    given a genome file, return a string of sequences
+    '''
+    chromsome_seq = SeqIO.read(openFile(file_genome), 'fasta')
+    return str(chromsome_seq.seq).upper()
+
+
+def getCDSplus(tdf):
+    '''
+    tdf is (transcript_id, tdf)
+    given a transcript_id, get the DNA_seq based on the gtf annotation
+    dcgtf_transcript is a dict with transcript_id as key, and gtf dataframe for that transcript as value
+    '''
+    transcript_id, tdf = tdf
+    tdf = tdf[tdf['feature'].isin(['exon','CDS'])]
+    strand = tdf['strand'].iloc[0]
+    if strand =='+':
+        tdf = tdf.sort_values(by=['start','end'])# sort by location from small to large if positive strand
+    else:
+        tdf = tdf.sort_values(by='start', ascending=False) #negative strand, from large to small
+    
+    # remove rows before the first exon till the first CDS, then remove all CDS
+    keep = []
+    for i in range(tdf.shape[0]):
+        if tdf.iloc[i]['feature'] != 'CDS':
+            keep.append(False)
         else:
-            merged.append(i)
-    return merged
+            keep.append(True)
+            frame = tdf.iloc[i]['frame']
+            break
+    # cases that only with CDS annotations
+    if 'exon' not in set(tdf['feature']):
+        tlocs = [[i-1,j] for i,j in zip(tdf['start'], tdf['end'])]# all locs of CDS
+    else:
+        for j in range(i+1, tdf.shape[0]):
+            if tdf.iloc[j]['feature'] == 'CDS':
+                keep.append(False)
+            else:
+                if strand == '+':
+                    if tdf.iloc[j]['start'] >= tdf.iloc[i]['end']:
+                        keep.append(True)
+                    else:
+                        keep.append(False)
+                else:
+                    if tdf.iloc[j]['end'] <= tdf.iloc[i]['start']:
+                        keep.append(True)
+                    else:
+                        keep.append(False)
+        tdf = tdf[keep]
+        tlocs = [[i-1,j] for i,j in zip(tdf['start'], tdf['end'])]
+
+    tlocs = sorted(tlocs, key=lambda x:x[0]) # sort by location from small to large
+    return transcript_id, frame, tlocs
+
+
+def getCDSstrand(CDS, AA_seq):
+    '''get CDS strand based on AA_seq
+    Here CDS is always the forward strand
+    if CDS translation equal AA_seq, return '+'
+    if reverse complement of CDS translated to AA_seq, return '-'
+    otherwise, print warning, return '.'
+    '''
+    CDS_f = Seq(CDS)
+    CDS_r = CDS_f.reverse_complement()
+    AA_f = str(CDS_f.translate().split('*')[0])
+    AA_r = str(CDS_r.translate().split('*')[0])
+    if AA_f == AA_seq:
+        return '+'
+    if AA_r == AA_seq:
+        return '-'
+    
+    return '.'
+
+
+def getStrand(r):
+    '''
+    r is a row in df_transcript2
+    return the correct strand based on CDS sequence and AA_seq
+    '''
+    AA_seq = r['AA_seq']
+    CDS = r['CDS']
+    strand = r['strand']
+    strand_n = getCDSstrand(CDS, AA_seq)
+    if strand_n == '.':
+        print(r.name,'something wrong with CDS region')
+    elif strand_n != strand:
+        print(r.name, 'strand changed from {} to {}'.format(strand, strand_n))
+    else:
+        pass
+    return strand_n
+
+
+def getCodons(ttdf, AA_len=None):
+    '''
+    ttdf is with 'locs', 'bases', 'chr', 'strand'
+    return a dataframe, in the form of (chromosome, strand, codon1_position, codon), like ('1','+',1512269, 'ATG')
+    AA_len is the number of codons to keep. If None, return as long as possible. It is supporsed that the reading frame is correct and each line with only one base
+    '''
+    if AA_len is None:
+        AA_len = ttdf.shape[0] // 3
+    ttdf = ttdf.iloc[:AA_len * 3]
+    tdf_result = ttdf.groupby(np.arange(AA_len * 3) // 3).agg({'chr':'first', 'strand':'first', 'locs':'first', 'bases':lambda x:''.join(x), 'variant_id':lambda x:','.join(list(dict.fromkeys([e for e in list(x) if pd.notnull(e)])))})
+    tdf_result.columns = ['chr', 'strand', 'codon1', 'codon','variants']
+    return tdf_result
+
+
+# get loc for each nt in CDSplus
+def getPostionsFromLocs(locs):
+    '''
+    locs like [(65564, 65573), (69036, 71585)]
+    return a list of positions
+    '''
+    results = []
+    for s,e in locs:
+        results = results + list(range(s+1, e+1))#Note, there is a -1 operation for genomicLocs above
+    return results
+
+
+def get_df_transcript2(file_gtf, file_protein, file_genome,cpu_counts,datatype):
+    '''
+    get df_transcripts2, add AA_seq, add CDSplus and other notes
+    for some reason, the strand of sequences in the gtf file is not accurate. need to calculate
+    '''
+    # get df_gtf
+    df_gtf = pd.read_csv(file_gtf, sep='\t',header=None, comment='#')
+    df_gtf.columns = ['seqname','source','feature','start','end','score','strand','frame','protein_id']
+    # change df_gtf seqname to str
+    df_gtf['seqname'] = df_gtf['seqname'].astype(str)
+    
+    # get df_protein
+    df_protein = parse_proteins(file_protein)
+    
+    # get genome DNA sequences
+    chromosome_seq = parse_genome(file_genome)
+    print('finish reading genome file')
+    
+    # get protein_id in df_gtf
+    protein_ids_gtf = set(df_gtf[df_gtf['protein_id'].notnull()]['protein_id'])
+    print('number of proteins from the gtf file', len(protein_ids_gtf)) 
+    
+    # some protein_id only found in the protein fasta file
+    df_transcript2 = df_protein.set_index('protein_id').copy()
+    # add strand
+    dc_gtfpr2strand = dict(zip(df_gtf['protein_id'], df_gtf['strand']))
+    df_transcript2['strand'] = [dc_gtfpr2strand[e] for e in df_transcript2.index]
+
+    df_cds = df_gtf[df_gtf['feature'] == 'CDS']
+    tdc_pr2cds = {k:v for k,v in df_cds.groupby('protein_id')}
+    
+    # add CDSLoc and CDS sequence
+    dc_pr2cdsLocs = {}
+    for k,v in tdc_pr2cds.items():
+        v = v.sort_values(by='start')
+        cdsLocs = [[i-1,j] for i,j in zip(v['start'],v['end'])]
+        dc_pr2cdsLocs[k] = cdsLocs
+    
+    df_transcript2['CDSloc'] = [dc_pr2cdsLocs[e] for e in df_transcript2.index]
+    df_transcript2['CDS'] = df_transcript2.apply(lambda x:''.join([chromosome_seq[i:j] for i,j in x['CDSloc']]), axis=1)
+    
+    # correct strand for gtf format data from transdecoder
+    if datatype == 'gtf':
+        strand_n = df_transcript2.apply(getStrand, axis=1)
+        df_transcript2['strand'] = strand_n
+
+    # get CDSplus sequences
+    df_gtf_group = {k:v for k,v in df_gtf.groupby('protein_id') }
+    
+    pool = Pool(cpu_counts)
+    results = pool.map(getCDSplus, df_gtf_group.items())
+    pool.close()
+    pool.join()
+    
+    
+    tdf = pd.DataFrame(results)
+    tdf.columns = ['protein_id','frame', 'genomicLocs']
+    df_transcript2 = df_transcript2.merge(tdf, left_index=True, right_on='protein_id', how='left')
+    print('finishing get locs and frame')
+    df_transcript2['genomicStart'] = df_transcript2['genomicLocs'].apply(lambda x:None if not isinstance(x,list) else x[0][0])
+    df_transcript2['genomicEnd'] = df_transcript2['genomicLocs'].apply(lambda x:None if not isinstance(x,list) else x[-1][1])
+    
+    df_transcript2['CDSplus'] = df_transcript2.apply(lambda x:''.join([chromosome_seq[i:j] for i,j in x['genomicLocs']]), axis=1)
+    
+    df_transcript2 = df_transcript2.set_index('protein_id')
+    return df_transcript2
+
+
+def checkIfAAtranslatedFromGenome(r):
+    '''given a r is a row in df_transcript2, return if the protein sequence agrees with the genome annotation
+    '''
+    if len(r['AA_seq']) == len(r['AA_translate']):
+        return True
+
+    CDS = r['CDS']
+    strand = r['strand']
+    frame = int(r['frame'])
+    CDS = Seq(CDS)
+    if strand == '-':
+        CDS = CDS.reverse_complement()
+    CDS = CDS[frame:]
+    CDS = CDS[:(len(CDS) // 3) * 3]
+    CDS_len = len(CDS)
+    if str(CDS[-3:]) in ['TAA','TGA','TAG']:
+        CDS_len -= 3
+    if CDS_len / len(r['AA_seq']) == 3:
+        return True
+    return False
+
 
 class PerChrom(object):
     """
@@ -68,207 +286,11 @@ class PerChrom(object):
         self.chromosome = chromosome # chromosome name
         
         # dataframe to store the mutation information
-        self.df_mutations = self.parse_mutation()
+        self.df_mutations = parse_mutation(file_mutations=self.file_mutations, chromosome=self.chromosome)
         # dataframe to store all transcript info
-        self.df_transcript2 = self.get_df_transcript2()
+        self.df_transcript2 = get_df_transcript2(file_gtf=self.file_gtf, file_protein=self.file_protein, file_genome=self.file_genome,cpu_counts=self.threads,datatype=self.datatype)
         self.df_transcript2['seqname'] = self.chromosome
 
-
-    def parse_proteins(self):
-        '''
-        return a dataframe with file_proteins. file_proteins is processed by perGeno, with '\t' to separate protein_id and original description
-        '''
-        file_proteins = self.file_protein
-        # get protein sequences
-        if file_proteins.endswith('.gz'):
-            tls =list(SeqIO.parse(gzip.open(file_proteins,'rt'), 'fasta'))
-        else:
-            tls =list(SeqIO.parse(open(file_proteins,'r'), 'fasta'))
-        df_protein = pd.DataFrame([[seq.id, seq.description.split('\t',maxsplit=1)[1], str(seq.seq).strip('*')] for seq in tls])#remove '*' which represent stop codons
-        df_protein.columns = ['protein_id','protein_description', 'AA_seq']
-        print('from the protein file, totally', len(tls), 'protein sequences.')
-        df_protein['protein_id_fasta'] = df_protein['protein_description'].apply(lambda x:x.split()[0])
-        df_protein['protein_anno'] = df_protein.apply(lambda x:x['protein_description'].split(maxsplit=1)[-1] if x['protein_description'].split(maxsplit=1)[-1] != x['protein_id_fasta'] else '', axis=1)
-        return df_protein
-
-    def parse_genome(self):
-        '''
-        file_genome can be a gzip file. It should be a fasta file
-        given a genome file, return a string of sequences
-        '''
-        chromsome_seq = SeqIO.read(openFile(self.file_genome), 'fasta')
-        return str(chromsome_seq.seq).upper()
-
-
-    def parse_mutation(self):
-        '''parse mutation file
-        '''
-        file_mutations = self.file_mutations
-        chromosome = self.chromosome
-
-        df_mutations = pd.read_csv(file_mutations, sep='\t',low_memory=False)
-        df_mutations['pos_end'] = df_mutations['pos'] + df_mutations['ref'].str.len() -1 # add a column, 'pos_end' to include all span of the mutation in reference genome
-        df_mutations = df_mutations.sort_values(by = 'pos')
-        df_mutations['chr'] = chromosome
-        
-        return df_mutations
-
-
-    def getCDSplus(self, tdf):
-        '''
-        tdf is (transcript_id, tdf)
-        given a transcript_id, get the DNA_seq based on the gtf annotation
-        dcgtf_transcript is a dict with transcript_id as key, and gtf dataframe for that transcript as value
-        '''
-        transcript_id, tdf = tdf
-        tdf = tdf[tdf['feature'].isin(['exon','CDS'])]
-        strand = tdf['strand'].iloc[0]
-        if strand =='+':
-            tdf = tdf.sort_values(by=['start','end'])# sort by location from small to large if positive strand
-        else:
-            tdf = tdf.sort_values(by='start', ascending=False) #negative strand, from large to small
-        
-        # remove rows before the first exon till the first CDS, then remove all CDS
-        keep = []
-        for i in range(tdf.shape[0]):
-            if tdf.iloc[i]['feature'] != 'CDS':
-                keep.append(False)
-            else:
-                keep.append(True)
-                frame = tdf.iloc[i]['frame']
-                break
-        # cases that only with CDS annotations
-        if 'exon' not in set(tdf['feature']):
-            tlocs = [[i-1,j] for i,j in zip(tdf['start'], tdf['end'])]# all locs of CDS
-        else:
-            for j in range(i+1, tdf.shape[0]):
-                if tdf.iloc[j]['feature'] == 'CDS':
-                    keep.append(False)
-                else:
-                    if strand == '+':
-                        if tdf.iloc[j]['start'] >= tdf.iloc[i]['end']:
-                            keep.append(True)
-                        else:
-                            keep.append(False)
-                    else:
-                        if tdf.iloc[j]['end'] <= tdf.iloc[i]['start']:
-                            keep.append(True)
-                        else:
-                            keep.append(False)
-            tdf = tdf[keep]
-            tlocs = [[i-1,j] for i,j in zip(tdf['start'], tdf['end'])]
-
-        tlocs = sorted(tlocs, key=lambda x:x[0]) # sort by location from small to large
-        return transcript_id, frame, tlocs
-    
-    def getCDSstrand(self, CDS, AA_seq):
-        '''get CDS strand based on AA_seq
-        Here CDS is always the forward strand
-        if CDS translation equal AA_seq, return '+'
-        if reverse complement of CDS translated to AA_seq, return '-'
-        otherwise, print warning, return '.'
-        '''
-        CDS_f = Seq(CDS)
-        CDS_r = CDS_f.reverse_complement()
-        AA_f = str(CDS_f.translate().split('*')[0])
-        AA_r = str(CDS_r.translate().split('*')[0])
-        if AA_f == AA_seq:
-            return '+'
-        if AA_r == AA_seq:
-            return '-'
-        
-        return '.'
-
-    def getStrand(self, r):
-        '''
-        r is a row in df_transcript2
-        return the correct strand based on CDS sequence and AA_seq
-        '''
-        AA_seq = r['AA_seq']
-        CDS = r['CDS']
-        strand = r['strand']
-        strand_n = self.getCDSstrand(CDS, AA_seq)
-        if strand_n == '.':
-            print(r.name,'something wrong with CDS region')
-        elif strand_n != strand:
-            print(r.name, 'strand changed from {} to {}'.format(strand, strand_n))
-        else:
-            pass
-        return strand_n
-
-    def get_df_transcript2(self):
-        '''
-        get df_transcripts2, add AA_seq, add CDSplus and other notes
-        for some reason, the strand of sequences in the gtf file is not accurate. need to calculate
-        '''
-
-        file_gtf = self.file_gtf
-        file_protein = self.file_protein
-        file_genome = self.file_genome
-        cpu_counts = self.threads
-        datatype = self.datatype
-
-        # get df_gtf
-        df_gtf = pd.read_csv(file_gtf, sep='\t',header=None, comment='#')
-        df_gtf.columns = ['seqname','source','feature','start','end','score','strand','frame','protein_id']
-        # change df_gtf seqname to str
-        df_gtf['seqname'] = df_gtf['seqname'].astype(str)
-        
-        # get df_protein
-        df_protein = self.parse_proteins()
-        
-        # get genome DNA sequences
-        chromosome_seq = self.parse_genome()
-        print('finish reading genome file')
-        
-        # get protein_id in df_gtf
-        protein_ids_gtf = set(df_gtf[df_gtf['protein_id'].notnull()]['protein_id'])
-        print('number of proteins from the gtf file', len(protein_ids_gtf)) 
-        
-        # some protein_id only found in the protein fasta file
-        df_transcript2 = df_protein.set_index('protein_id').copy()
-        # add strand
-        dc_gtfpr2strand = dict(zip(df_gtf['protein_id'], df_gtf['strand']))
-        df_transcript2['strand'] = [dc_gtfpr2strand[e] for e in df_transcript2.index]
-
-        df_cds = df_gtf[df_gtf['feature'] == 'CDS']
-        tdc_pr2cds = {k:v for k,v in df_cds.groupby('protein_id')}
-        
-        # add CDSLoc and CDS sequence
-        dc_pr2cdsLocs = {}
-        for k,v in tdc_pr2cds.items():
-            v = v.sort_values(by='start')
-            cdsLocs = [[i-1,j] for i,j in zip(v['start'],v['end'])]
-            dc_pr2cdsLocs[k] = cdsLocs
-        
-        df_transcript2['CDSloc'] = [dc_pr2cdsLocs[e] for e in df_transcript2.index]
-        df_transcript2['CDS'] = df_transcript2.apply(lambda x:''.join([chromosome_seq[i:j] for i,j in x['CDSloc']]), axis=1)
-        
-        # correct strand for gtf format data from transdecoder
-        if datatype == 'gtf':
-            strand_n = df_transcript2.apply(self.getStrand, axis=1)
-            df_transcript2['strand'] = strand_n
-
-        # get CDSplus sequences
-        df_gtf_group = {k:v for k,v in df_gtf.groupby('protein_id') }
-        
-        pool = Pool(cpu_counts)
-        results = pool.map(self.getCDSplus, df_gtf_group.items())
-        pool.close()
-        pool.join()
-        
-        
-        tdf = pd.DataFrame(results)
-        tdf.columns = ['protein_id','frame', 'genomicLocs']
-        df_transcript2 = df_transcript2.merge(tdf, left_index=True, right_on='protein_id', how='left')
-        print('finishing get locs and frame')
-        df_transcript2['genomicStart'] = df_transcript2['genomicLocs'].apply(lambda x:None if not isinstance(x,list) else x[0][0])
-        df_transcript2['genomicEnd'] = df_transcript2['genomicLocs'].apply(lambda x:None if not isinstance(x,list) else x[-1][1])
-        
-        df_transcript2['CDSplus'] = df_transcript2.apply(lambda x:''.join([chromosome_seq[i:j] for i,j in x['genomicLocs']]), axis=1)
-        
-        df_transcript2 = df_transcript2.set_index('protein_id')
-        return df_transcript2
 
     def getMutations(self, transcript_id):
         '''
@@ -339,19 +361,6 @@ class PerChrom(object):
             AA_seq = 'X' + AA_seq
         return AA_seq
 
-    # get loc for each nt in CDSplus
-    def getPostionsFromLocs(self, locs):
-        '''
-        locs like [(65564, 65573), (69036, 71585)]
-        return a list of positions
-        '''
-        results = []
-        for s,e in locs:
-            results = results + list(range(s+1, e+1))#Note, there is a -1 operation for genomicLocs above
-        return results
-
-
-
 
     def getMut(self, mutations, strand):
         '''
@@ -390,19 +399,6 @@ class PerChrom(object):
         tdf_m.columns = ['chr','pos','ref','alt','variant_id']
         return tdf_m
 
-    def getCodons(self, ttdf, AA_len=None):
-        '''
-        ttdf is with 'locs', 'bases', 'chr', 'strand'
-        return a dataframe, in the form of (chromosome, strand, codon1_position, codon), like ('1','+',1512269, 'ATG')
-        AA_len is the number of codons to keep. If None, return as long as possible. It is supporsed that the reading frame is correct and each line with only one base
-        '''
-        if AA_len is None:
-            AA_len = ttdf.shape[0] // 3
-        ttdf = ttdf.iloc[:AA_len * 3]
-        tdf_result = ttdf.groupby(np.arange(AA_len * 3) // 3).agg({'chr':'first', 'strand':'first', 'locs':'first', 'bases':lambda x:''.join(x), 'variant_id':lambda x:','.join(list(dict.fromkeys([e for e in list(x) if pd.notnull(e)])))})
-        tdf_result.columns = ['chr', 'strand', 'codon1', 'codon','variants']
-        return tdf_result
-
 
     def translateCDSplusWithMut(self, transcript_id):
         '''
@@ -415,7 +411,7 @@ class PerChrom(object):
         tdc_result = {}
         r = df_transcript2.loc[transcript_id]
         locs = r['genomicLocs']
-        locs = self.getPostionsFromLocs(locs)
+        locs = getPostionsFromLocs(locs)
         CDSplus = Seq(r['CDSplus'])
         AA_seq = r['AA_seq']
         AA_ori = AA_seq
@@ -498,8 +494,8 @@ class PerChrom(object):
         df_CDSalt = df_CDSalt[df_CDSalt['bases'].notnull()]
         # get codons from df_CDSref. codon is (chromosome, strand, start, codon), like ('1','+',1512269, 'ATG'). value is from AA_seq
         
-        codons_ref = self.getCodons(df_CDSref, AA_len=AA_len)
-        codons_alt = self.getCodons(df_CDSalt, AA_len=None)
+        codons_ref = getCodons(df_CDSref, AA_len=AA_len)
+        codons_alt = getCodons(df_CDSalt, AA_len=None)
         codons_ref['AA_ref'] = list(AA_seq)
         codons_ref['AA_index'] = list(range(1, AA_len+1))
         if frame !=0: codons_ref['AA_index'] = codons_ref['AA_index'] + 1
@@ -590,7 +586,7 @@ class PerChrom(object):
             
         if frame != 0:
             new_AA = 'X' + new_AA
-    #    print(time.time() - t0)
+        # print(time.time() - t0)
         if not frameChange:
             if n_variant_AA + n_deletion_AA + n_insertion_AA == 0 and (not stopGain):
                 if AA_ori in new_AA:#new_AA is longer than AA_ori at the end of the sequence, stop loss
@@ -624,27 +620,6 @@ class PerChrom(object):
             return {}
 
 
-    def checkIfAAtranslatedFromGenome(self, r):
-        '''given a r is a row in df_transcript2, return if the protein sequence agrees with the genome annotation
-        '''
-        if len(r['AA_seq']) == len(r['AA_translate']):
-            return True
-
-        CDS = r['CDS']
-        strand = r['strand']
-        frame = int(r['frame'])
-        CDS = Seq(CDS)
-        if strand == '-':
-            CDS = CDS.reverse_complement()
-        CDS = CDS[frame:]
-        CDS = CDS[:(len(CDS) // 3) * 3]
-        CDS_len = len(CDS)
-        if str(CDS[-3:]) in ['TAA','TGA','TAG']:
-            CDS_len -= 3
-        if CDS_len / len(r['AA_seq']) == 3:
-            return True
-        return False
-
     def run_perChrom(self):
         '''run perChrom
         '''
@@ -671,7 +646,7 @@ class PerChrom(object):
         
         # for RefSeq, sometimes the GTF annotation does not agree with the protein sequence, which means the len(CDS)/len(protein) != 3, find those cases and do not change the proteins
         if datatype == 'RefSeq':
-            tdf_special = df_transcript2.loc[~df_transcript2.apply(self.checkIfAAtranslatedFromGenome,axis=1)]
+            tdf_special = df_transcript2.loc[~df_transcript2.apply(checkIfAAtranslatedFromGenome,axis=1)]
             if tdf_special.shape[0] > 0:
                 print('chromosome', chromosome, list(tdf_special.index), 'not translated from the CDS sequences in the genome. do not change')
                 for transcript_id in tdf_special.index:
