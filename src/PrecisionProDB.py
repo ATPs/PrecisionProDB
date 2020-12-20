@@ -25,6 +25,8 @@ if __name__ == '__main__':
     parser.add_argument('-A','--all_chromosomes', help='default keep variant in chromosomes and ignore those in short fragments of the genome. if set, use all chromosomes including fragments when parsing the vcf file', action='store_true')
     parser.add_argument('-D','--download', help='''download could be 'GENCODE','RefSeq','Ensembl','Uniprot'. If set, perGeno will try to download genome, gtf and protein files from the Internet. Download will be skipped if "--genome, --gtf, --protein, (--uniprot)" were all set. Settings from "--genome, --gtf, --protein, (--uniprot), --datatype" will not be used if the files were downloaded by perGeno. default "".''', default='', type=str, choices=['GENCODE','RefSeq','Ensembl','Uniprot',''])
     parser.add_argument('-U','--uniprot', help='''uniprot protein sequences. If more than one file, use "," to join the files. default "". For example, "UP000005640_9606.fasta.gz", or "UP000005640_9606.fasta.gz,UP000005640_9606_additional.fasta" ''', default='', type=str)
+    parser.add_argument('--uniprot_min_len', help='''minimum length required when matching uniprot sequences to proteins annotated in the genome. default 20 ''', default=20, type=int)
+    
     
     f = parser.parse_args()
     
@@ -41,6 +43,7 @@ if __name__ == '__main__':
     chromosome_only = not f.all_chromosomes
     download = f.download
     files_uniprot = f.uniprot
+    uniprot_min_len=f.uniprot_min_len
     print(f)
     
     time0 = time.time()
@@ -99,7 +102,7 @@ if __name__ == '__main__':
     if download == 'UNIPROT':
         print('try to extract Uniprot proteins from Ensembl models')
         import extractMutatedUniprot
-        extractMutatedUniprot.extractMutatedUniprot(files_uniprot=files_uniprot, files_ref=file_protein, files_alt=outprefix + '.pergeno.protein_all.fa', outprefix=outprefix, length_min = 20)
+        extractMutatedUniprot.extractMutatedUniprot(files_uniprot=files_uniprot, files_ref=file_protein, files_alt=outprefix + '.pergeno.protein_all.fa', outprefix=outprefix, length_min = uniprot_min_len)
 
     
     print('PrecisionProDB finished!, total seconds:', time.time() - time0)
