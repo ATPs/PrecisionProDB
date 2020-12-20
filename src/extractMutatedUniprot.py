@@ -96,8 +96,8 @@ def extractMutatedUniprot(files_uniprot, files_ref, files_alt, outprefix, length
 
 
 description = '''
-match uniprot proteins in files_uniprot with files_ref. To start a match, the min length of protein is length_min.
-output mutated uniprot proteins in files_alt.
+Match UniProt proteins in files_uniprot with files_ref.
+Output mutated proteins in files_alt.
 write three files, outprefix + '.uniprot_changed.tsv'/'.uniprot_changed.fa'/'.uniprot_all.fa'
 '''
 
@@ -108,7 +108,7 @@ if __name__ == '__main__':
     parser.add_argument('-r', '--files_ref', help='reference proteins to match with uniprot proteins. If more than one files, join by ","')
     parser.add_argument('-a', '--files_alt', help='altered reference proteins. If more than one files, join by ",". The order should be the same as files_ref')
     parser.add_argument('-o', '--outprefix', help='prefix for output files. default:"perGeno"', default='perGeno')
-    parser.add_argument('-m', '--length_min', help='output folder for the downloaded files. default: "20"', default=20, type=int)
+    parser.add_argument('-m', '--length_min', help='minumum length required when matching UniProt sequences with sequences in files_ref. default: "20"', default=20, type=int)
     f = parser.parse_args()
     
     files_uniprot = f.files_uniprot

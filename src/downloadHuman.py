@@ -144,8 +144,8 @@ def download(datatype, workfolder='.'):
 
 
 description = '''
-download the latest human gene models from RefSeq, GENCODE or Ensembl to run perGeno
-If datatype is "Uniprot", Ensembl and Uniprot human sequences (UP000005640_9606, UP000005640_9606_additional) will be downloaded
+download the latest human gene models from RefSeq, GENCODE, Ensembl or UniProt to run PrecisionProDB.
+If datatype is "Uniprot", Ensembl and UniProt human sequences (UP000005640_9606, UP000005640_9606_additional) will be downloaded
 '''
 
 if __name__ == '__main__':
