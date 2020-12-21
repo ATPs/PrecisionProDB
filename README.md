@@ -16,6 +16,7 @@
     - [variant file in text format](#variant-file-in-text-format)
     - [user provided gene models](#user-provided-gene-models)
   - [get help information for each module](#get-help-information-for-each-module)
+- [Outputs](#outputs)
 - [Benchmark](#benchmark)
   - [CPU/Memory consumption with 8 threads](#cpumemory-consumption-with-8-threads)
   - [Running time and required memory with different threads](#running-time-and-required-memory-with-different-threads)
@@ -170,7 +171,9 @@ optional arguments:
 
 ```
 
-
+# Outputs
+For more information, visit the [wiki](https://github.com/ATPs/PrecisionProDB/wiki) page.
+https://github.com/ATPs/PrecisionProDB/wiki
 
 # Benchmark
 
