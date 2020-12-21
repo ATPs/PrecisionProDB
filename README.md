@@ -98,7 +98,7 @@ python Path_of_PrecisionProDB/src/PrecisionProDB.py -m Path_of_variant_file -o P
 There are several files in the `src` folder. Each of them were designed in a way that can be run independently. To get help, run
 
 ```bash
-python Path_of_PrecisionProDB/src/module_name_py -h
+python Path_of_PrecisionProDB/src/module_name.py -h
 ```
 
 To get help for the main program, run
