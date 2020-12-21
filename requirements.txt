@@ -1,0 +1,6 @@
+# the following packages are required. Those versions were tested, but lower versions should work.
+biopython >= 1.78
+pandas >= 1.0.5
+numpy >= 1.18.5
+python >= 3.7.0
+
