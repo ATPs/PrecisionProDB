@@ -105,4 +105,4 @@ if __name__ == '__main__':
         extractMutatedUniprot.extractMutatedUniprot(files_uniprot=files_uniprot, files_ref=file_protein, files_alt=outprefix + '.pergeno.protein_all.fa', outprefix=outprefix, length_min = uniprot_min_len)
 
     
-    print('PrecisionProDB finished!, total seconds:', time.time() - time0)
+    print('PrecisionProDB finished! Total seconds:', time.time() - time0)
