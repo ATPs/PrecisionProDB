@@ -100,7 +100,7 @@ The manuscript of PrecisionProDB is submitted and this part will be updated soon
 
 # Usage Information
 
-<span style="color:red">**Note**</span>: `python` in the example scripts below are Python3. It can be changed to `python3`, or full name of `Python` like `/home/xcao/p/anaconda3/bin/python3.7`, if multiple versions of `Python` exist in the system or `Python` is not in the system PATH.
+**Note**: `python` in the example scripts below are Python3. It can be changed to `python3`, or full name of `Python` like `/home/xcao/p/anaconda3/bin/python3.7`, if multiple versions of `Python` exist in the system or `Python` is not in the system PATH.
 
 ## Typical usage
 ### The most simple case
