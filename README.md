@@ -226,8 +226,10 @@ The following messages will be printed out.
 usage: PrecisionProDB.py [-h] [-g GENOME] [-f GTF] -m MUTATIONS [-p PROTEIN] [-t THREADS] [-o OUT] [-a {GENCODE_GTF,GENCODE_GFF3,RefSeq,Ensembl_GTF,gtf}]
                          [-k PROTEIN_KEYWORD] [-F] [-s SAMPLE] [-A] [-D {GENCODE,RefSeq,Ensembl,Uniprot,}] [-U UNIPROT] [--uniprot_min_len UNIPROT_MIN_LEN]
 
-PrecisionProDB, personal proteogenomic tools which outputs a new reference protein based on the variants data. VCF/tsv file as the variant input If the variant file is
-in tsv format, at least four columns are required in the header: chr, pos, ref, alt. Try to convert the file to proper format if you have a bed or other file.
+PrecisionProDB, a personal proteogenomic tool which outputs a new reference protein based on the variants data. 
+A VCF or /a tsv file can be used as the variant input. If the
+variant file is in tsv format, at least four columns are required in the
+header: chr, pos, ref, alt. Additional columns will be ignored. Try to Convert the file to proper format if you have a bed file or other types of variant file.
 
 optional arguments:
   -h, --help            show this help message and exit
