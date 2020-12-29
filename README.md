@@ -100,21 +100,21 @@ The manuscript of PrecisionProDB is submitted and this part will be updated soon
 
 # Usage Information
 
-**Note**: `python` in the example scripts below are Python3. It can be changed to `python3`, or full name of `Python` like `/home/xcao/p/anaconda3/bin/python3.7`, if multiple versions of `Python` exist in the system or `Python` is not in the system PATH.
+**Note**: `python` in the example scripts below are Python3. If you are unsure about the version of your python, use `python --version` to show the version. In some systems you might need to use `python3` to specify Python3, or use the full name of `Pythons` (e.g., `/home/xcao/p/anaconda3/bin/python3.7`), if multiple versions of `Python` exist in the system or `Python` is not in the system PATH.
 
 ## Typical usage
 ### The most simple case
 
-We suppose that in most case, users will have a variant file in [VCF](https://samtools.github.io/hts-specs) format. If there is only one sample in the VCF format, the command will be like:
+We suppose that in most case, users will have a variant file in [VCF](https://samtools.github.io/hts-specs) format. If there is only one sample in the VCF format, the simplest command will be:
 ```bash
 python Path_of_PrecisionProDB/src/PrecisionProDB.py -m Name_of_variant_file -D GENCODE -o Prefix_of_output
 ```
-- `-m Name_of_variant_file` defines the input variant file. If the variant file is ends with '.vcf.gz' or '.vcf' (case ignored), it will be treated as a [VCF](https://samtools.github.io/hts-specs) file. File will be treated as [TSV](https://en.wikipedia.org/wiki/Tab-separated_values) file in all other cases.
-- `-D GENCODE` defines the annotation reference to be used. In this setting, personalized protein sequences based on the `GENCODE` annotation will be generated. PrecisionProDB will download required files of GENCODE models automatically. To get gene models in other supported resources, `GENCODE` could be changed to `RefSeq`, `Ensembl` or `Uniprot`.  
+- `-m Name_of_variant_file` defines the input variant file (include the full path if the input file is not in the current folder). If the variant file ends with '.vcf' (case ignored), it will be treated as a [VCF](https://samtools.github.io/hts-specs) file. In all other cases a file will be treated as a [TSV](https://en.wikipedia.org/wiki/Tab-separated_values) file. Files end with '.gz' (e.g., '.vcf.gz' or '.tsv.gz') will be treated as gzip compressed files.
+- `-D GENCODE` defines the annotation reference to be used. In this example, personalized protein sequences based on the `GENCODE` annotation will be generated. PrecisionProDB will download required files of GENCODE models automatically. To use gene models in other supported resources, `GENCODE` could be changed to `RefSeq`, `Ensembl` or `Uniprot`.  
 - `-o Prefix_of_output` defines the prefix of the output filenames.
 
 ### VCF with multiple samples
-If there are multiple samples in the VCF file, `-s` option should be used to include the sample name in the VCF file.
+If there are multiple samples in the VCF file, the `-s` option should be used to specify the sample name to be used in the VCF file.
 ```bash
 python Path_of_PrecisionProDB/src/PrecisionProDB.py -m Name_of_variant_file -D GENCODE -o Prefix_of_output -s Sample_name
 ```
@@ -124,18 +124,18 @@ If there is a local version of gene annotation from Ensembl, the command will be
 ```bash
 python Path_of_PrecisionProDB/src/PrecisionProDB.py -m Name_of_variant_file -o Prefix_of_output -s Sample_name -g Ensembl_Genome -p Ensembl_protein -f Ensembl_gtf -a Ensembl_GTF
 ```
-Ensembl_Genome, Ensembl_protein, Ensembl_gtf is the location of Ensembl genome, protein, GTF files, respectively. These files can be downloaded from Ensembl website as metioned previously, or use the `downloadHuman` module.
+Ensembl_Genome, Ensembl_protein, and Ensembl_gtf are the locations of the Ensembl genome, protein, and GTF files, respectively. These files can be downloaded from Ensembl website as metioned previously, or use the `downloadHuman` module.
 ```bash
 python Path_of_PrecisionProDB/src/downloadHuman.py -d Ensembl -o Output_folder
 ```
 Output_folder is the path of output folder to store the downloaded files.
 
-### variant file in text format
+### Variant file in text format
 
-If the variant file is in a tab-separated values ([TSV](https://en.wikipedia.org/wiki/Tab-separated_values)) format, 
-- it need to include a header column, with at least four columns: `chr`, `pos`, `ref`, `alt`. There is no requirement for order of these columns, as `pandas` was used to parse the file.
+If the variant file is in the tab-separated values ([TSV](https://en.wikipedia.org/wiki/Tab-separated_values)) format, 
+- it needs to include a header row, with at least four columns: `chr`, `pos`, `ref`, `alt`. There is no requirement for the order of these columns, as `pandas` was used to parse the file.
 - additional columns are allowed, but will be ignored.
-- the `chr`, `pos`, `ref` and `alt` columns were coded in the way like the VCF file. This means that for deletions, it should be like `chr1 10146 AC A`, rather than `chr1 10147 C . `.
+- the `chr`, `pos`, `ref` and `alt` columns were coded in the VCF format. This means that for deletions, it should be written as `chr1 10146 AC A`, rather than `chr1 10147 C . `.
 
 - The most simple text file looks like:
 
@@ -152,11 +152,11 @@ If the variant file is in a tab-separated values ([TSV](https://en.wikipedia.org
 python Path_of_PrecisionProDB/src/PrecisionProDB.py -m Name_of_variant_file -D GENCODE -o Prefix_of_output
 ```
 
-- `Name_of_variant_file` is the name of the variant file. If the variant file is not ends with '.vcf.gz' or '.vcf' (case ignored), it will be treated as a text file. 
-- In this case, `-s` option will be ignored as there is only one sample.
+- `Name_of_variant_file` is the name of the variant file. If the variant file ends with '.vcf' (case ignored), it will be treated as a [VCF](https://samtools.github.io/hts-specs) file. In all other cases a file will be treated as a [TSV](https://en.wikipedia.org/wiki/Tab-separated_values) file. Files end with '.gz' (e.g., '.vcf.gz' or '.tsv.gz') will be treated as gzip compressed files.
+- For text file format input, `-s` option will be ignored as there is only one sample.
 - Here, `-D` is set to be `GENCODE`. GENCODE related files will be downloaded.
 
-### user provided gene models
+### User-provided gene models
 We tested GTF annotation generated by [TransDecoder](https://github.com/TransDecoder/TransDecoder/wiki).  
 Run TransDecoder in the [starting from a genome-based transcript structure GTF file](https://github.com/TransDecoder/TransDecoder/wiki#starting-from-a-genome-based-transcript-structure-gtf-file-eg-cufflinks-or-stringtie) mode.
 ```bash
@@ -176,7 +176,7 @@ Three files will be generated in the `examples` folder.
 - `text_variant.pergeno.protein_changed.fa`: all proteins which are different from the input protein sequences after incoporating the variants.
 
 Note:
-* Protein names and descriptions in the fasta file is the same as in the input protein file, and adding the `Tab` symbol (`\t`) + `changed` or `unchanged` to indicate if the protein sequence is altered. 
+* Protein names and descriptions in the fasta file are the same as in the input protein file, and the `Tab` symbol (`\t`) + `changed` or `unchanged` were added to indicate if the protein sequence is altered. 
 * e.g., `ENSP00000328207.6|ENST00000328596.10|ENSG00000186891.14|OTTHUMG00000001414|OTTHUMT00000004085.1|TNFRSF18-201|TNFRSF18|255  unchanged`, `ENSP00000424920.1|ENST00000502739.5|ENSG00000162458.13|OTTHUMG00000003079|OTTHUMT00000368044.1|FBLIM1-210|FBLIM1|144   changed`.
 
 
@@ -196,8 +196,8 @@ Five files will be generated in the `examples` folder.
 Note:
 
 * For altered proteins, `__1`, `__2`, `__12` will be added to the ID of the protein. 
-  * `__1` and `__2` mean that the alleles of the protein is from the first, second variant file, respectively. 
-  * `__12` means that the first and second alleles altering the protein sequence are the same. 
+  * `__1` and `__2` mean that the alleles of the protein is from the first and the second variant file, respectively. 
+  * `__12` means that the the altered protein sequence are the same for the first and the second alleles. 
   * e.g., `>ENSP00000308367.7|ENST00000312413.10|ENSG00000011021.23|OTTHUMG00000002299|-|CLCN6-201|CLCN6|847__12   changed`, `ENSP00000263934.6|ENST00000263934.10|ENSG00000054523.18|OTTHUMG00000001817|OTTHUMT00000005103.1|KIF1B-201|KIF1B|1770__2        changed`, `ENSP00000332771.4|ENST00000331433.5|ENSG00000186510.12|OTTHUMG00000009529|OTTHUMT00000026326.1|CLCNKA-201|CLCNKA|687__1        changed`, `ENSP00000493376.2|ENST00000641515.2|ENSG00000186092.6|OTTHUMG00000001094|OTTHUMT00000003223.1|OR4F5-202|OR4F5|326      unchanged`.
 * The variant file looks like
   ```
@@ -210,7 +210,7 @@ Note:
   ```
 
 
-## get help information for each module
+## Get help information for each module
 There are several files in the `src` folder. Each of them were designed in a way that can be run independently. To get help, run
 
 ```bash
@@ -229,9 +229,9 @@ usage: PrecisionProDB.py [-h] [-g GENOME] [-f GTF] -m MUTATIONS [-p PROTEIN] [-t
                          [-k PROTEIN_KEYWORD] [-F] [-s SAMPLE] [-A] [-D {GENCODE,RefSeq,Ensembl,Uniprot,}] [-U UNIPROT] [--uniprot_min_len UNIPROT_MIN_LEN]
 
 PrecisionProDB, a personal proteogenomic tool which outputs a new reference protein based on the variants data. 
-A VCF or /a tsv file can be used as the variant input. If the
-variant file is in tsv format, at least four columns are required in the
-header: chr, pos, ref, alt. Additional columns will be ignored. Try to Convert the file to proper format if you have a bed file or other types of variant file.
+A VCF or a tsv file can be used as the variant input. 
+If the variant file is in tsv format, at least four columns are required in the
+header row: chr, pos, ref, alt. Additional columns will be ignored. Convert the file to proper format if you have a bed file or other types of variant file.
 
 optional arguments:
   -h, --help            show this help message and exit
