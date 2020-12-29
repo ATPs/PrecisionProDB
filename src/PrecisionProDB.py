@@ -5,9 +5,10 @@ import downloadHuman
 import time
 
 description = '''
-PrecisionProDB, personal proteogenomic tools which outputs a new reference protein based on the variants data. 
-VCF/tsv file as the variant input
-If the variant file is in tsv format, at least four columns are required in the header: chr, pos, ref, alt. Try to convert the file to proper format if you have a bed or other file.
+PrecisionProDB, a personal proteogenomic tool which outputs a new reference protein based on the variants data. 
+A VCF or /a tsv file can be used as the variant input. If the
+variant file is in tsv format, at least four columns are required in the
+header: chr, pos, ref, alt. Additional columns will be ignored. Try to Convert the file to proper format if you have a bed file or other types of variant file.
 '''
 if __name__ == '__main__':
     import argparse
