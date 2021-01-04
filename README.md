@@ -29,8 +29,6 @@ PrecisionProDB is a Python package for proteogenomics, which can generate a cust
 - [Contact Information](#contact-information)
 
 
-For more information, visit the [**wiki**](https://github.com/ATPs/PrecisionProDB/wiki) page.
-
 # Description
 The major goal of PrecisionProDB is to generate personized protein sequences for protein identification in mass spectrometry (MS). 
 Main features:
