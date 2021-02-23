@@ -524,7 +524,7 @@ class PerChrom(object):
         
         # check if there is a stop gain
         t_alt = codons_alt.iloc[:len(AA_seq)]
-        t_alt = t_alt[(t_alt['AA_alt'] == '*') & ((t_alt['variants'] != '') | t_alt['variants_ref'].notnull())]
+        t_alt = t_alt[((t_alt['AA_alt'] == '*') & (t_alt['AA_ref'] != '*')) & ((t_alt['variants'] != '') | t_alt['variants_ref'].notnull())]
         if t_alt.shape[0] > 0:
             stopGain = True
             x = t_alt.iloc[0].copy()
