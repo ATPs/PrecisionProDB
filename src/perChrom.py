@@ -469,7 +469,7 @@ class PerChrom(object):
             if new_AA == AA_seq:
                 if frame != 0:
                     tdc_result['new_AA'] = 'X' + tdc_result['new_AA']
-                tdc['new_AA'] = tdc['new_AA'].replace('_','*')
+                tdc_result['new_AA'] = tdc_result['new_AA'].replace('_','*')
                 return tdc_result
             # only AA change
             if len(new_AA) == len(AA_seq):
@@ -484,7 +484,7 @@ class PerChrom(object):
                 tdc_result['variant_AA'] = ';'.join(t_alt.apply(lambda x:x['AA_ref'] + str(int(x['AA_index'])) + x['AA_alt'] + '({})'.format(x['variants']), axis=1))
                 if frame != 0:
                     tdc_result['new_AA'] = 'X' + tdc_result['new_AA']
-                    tdc['new_AA'] = tdc['new_AA'].replace('_','*')
+                tdc_result['new_AA'] = tdc_result['new_AA'].replace('_','*')
                 return tdc_result
                 
         # translation with non-standard codons or complicate cases
