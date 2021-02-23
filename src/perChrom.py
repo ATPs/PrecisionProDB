@@ -413,7 +413,7 @@ class PerChrom(object):
         locs = r['genomicLocs']
         locs = getPostionsFromLocs(locs)
         CDSplus = Seq(r['CDSplus'])
-        AA_seq = r['AA_seq']
+        AA_seq = r['AA_seq'].replace('*','_')
         AA_ori = AA_seq
         AA_translate = r['AA_translate']
         frame = int(r['frame'])
@@ -469,6 +469,7 @@ class PerChrom(object):
             if new_AA == AA_seq:
                 if frame != 0:
                     tdc_result['new_AA'] = 'X' + tdc_result['new_AA']
+                tdc['new_AA'] = tdc['new_AA'].replace('_','*')
                 return tdc_result
             # only AA change
             if len(new_AA) == len(AA_seq):
@@ -483,6 +484,7 @@ class PerChrom(object):
                 tdc_result['variant_AA'] = ';'.join(t_alt.apply(lambda x:x['AA_ref'] + str(int(x['AA_index'])) + x['AA_alt'] + '({})'.format(x['variants']), axis=1))
                 if frame != 0:
                     tdc_result['new_AA'] = 'X' + tdc_result['new_AA']
+                    tdc['new_AA'] = tdc['new_AA'].replace('_','*')
                 return tdc_result
                 
         # translation with non-standard codons or complicate cases
@@ -598,7 +600,7 @@ class PerChrom(object):
                     print('input AA', AA_ori)
                     print('translated AA', new_AA)
         
-        tdc_result['new_AA'] = new_AA
+        tdc_result['new_AA'] = new_AA.replace('_','*')
         tdc_result['frameChange'] = frameChange
         tdc_result['stopGain'] = stopGain
         tdc_result['AA_stopGain'] = AA_stopGain
