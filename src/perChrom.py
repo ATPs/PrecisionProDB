@@ -480,6 +480,8 @@ class PerChrom(object):
                         t_alt.loc[n, 'AA_alt'] = new_AA[n]
                         t_alt.loc[n, 'AA_index'] = n + 1
                         t_alt.loc[n, 'variants'] = ','.join(df_CDSplus.iloc[n*3:(n+1)*3]['variant_id'].dropna().drop_duplicates())
+                if frame !=0: 
+                    t_alt['AA_index'] = t_alt['AA_index'] + 1
                 tdc_result['n_variant_AA'] = t_alt.shape[0]
                 tdc_result['variant_AA'] = ';'.join(t_alt.apply(lambda x:x['AA_ref'] + str(int(x['AA_index'])) + x['AA_alt'] + '({})'.format(x['variants']), axis=1))
                 if frame != 0:
@@ -500,7 +502,8 @@ class PerChrom(object):
         codons_alt = getCodons(df_CDSalt, AA_len=None)
         codons_ref['AA_ref'] = list(AA_seq)
         codons_ref['AA_index'] = list(range(1, AA_len+1))
-        if frame !=0: codons_ref['AA_index'] = codons_ref['AA_index'] + 1
+        if frame !=0: 
+            codons_ref['AA_index'] = codons_ref['AA_index'] + 1
         # add ref AA to codon_alt
         codons_alt = codons_alt.merge(codons_ref, left_on=['chr','strand','codon1'], right_on=['chr','strand','codon1'], how='left')
         codons_alt.columns = ['chr','strand','codon1', 'codon_alt','variants', 'codon_ref', 'variants_ref','AA_ref','AA_index']
