@@ -86,6 +86,37 @@ def getEnsemblLatest():
 
     return url_genome, url_GTF, url_protein
 
+def getUniprotLatest():
+    '''return urls of files of latest Uniprot human sequences
+    '''
+    ftp_url = 'ftp.uniprot.org'
+    ftp = FTP(ftp_url)
+    ftp.login()
+    folder = '/pub/databases/uniprot/current_release/knowledgebase/reference_proteomes/Eukaryota/'
+    files = ftp.nlst(folder)
+
+    files = [e for e in files if 'UP000005640' in e]
+    files2 = []
+    for file in files:
+        # get the only folder in folders
+        try:
+            ftp.size(file)
+            files2.append(file)
+        except:
+            print(file, 'is a folder')
+            for f2 in ftp.nlst(file):
+                try:
+                    ftp.size(f2)
+                    files2.append(f2)
+                except:
+                    print(f2, 'is a folder')
+
+    url_uniprot = [e for e in files2 if 'UP000005640_9606.fasta' in e][0]
+    url_uniprot_additional = [e for e in files2 if 'UP000005640_9606_additional.fasta' in e][0]
+
+    return url_uniprot, url_uniprot_additional
+
+
 def downloadFile2folder(url, workfolder):
     '''
     download the file from url to workfolder. print url if cannot download
@@ -97,7 +128,13 @@ def downloadFile2folder(url, workfolder):
         #     return 0
         os.system(f'cd {workfolder} && wget -c --retry-connrefused --waitretry=2 --read-timeout=40 --timeout=15 -t 20 {url}')
     except:
-        print(url, 'cannot be downloaded, try to download yourself!')
+        print(url, 'cannot be downloaded, try to download yourself! Check the https://github.com/ATPs/PrecisionProDB for information. Use the latest version or contact the authors!')
+        exit()
+    # check if the file is downloaded sucessfully
+    basename = os.path.basename(url)
+    if not os.path.exists(os.path.join(workfolder, basename)):
+        print(url, 'cannot be downloaded, try to download yourself! Check the https://github.com/ATPs/PrecisionProDB for information. Use the latest version or contact the authors!')
+        exit()
 
 def download(datatype, workfolder='.'):
     '''download genome, GTF, protein sequence of {datatype} and store files in {workfolder}
@@ -126,9 +163,8 @@ def download(datatype, workfolder='.'):
     
 
     if datatype == 'UNIPROT':
-        url_uniprot = 'ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/reference_proteomes/Eukaryota/UP000005640_9606.fasta.gz'
+        url_uniprot, url_uniprot_additional = getUniprotLatest()
         downloadFile2folder(url_uniprot, workfolder)
-        url_uniprot_additional = 'ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/reference_proteomes/Eukaryota/UP000005640_9606_additional.fasta.gz'
         downloadFile2folder(url_uniprot_additional, workfolder)
 
 
