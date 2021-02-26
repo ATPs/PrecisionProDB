@@ -23,6 +23,9 @@ PrecisionProDB is a Python package for proteogenomics, which can generate a cust
     - [Variant file in text format](#variant-file-in-text-format-1)
   - [Get help information for each module](#get-help-information-for-each-module)
 - [Outputs](#outputs)
+  - [Count number of changed proteins](#count-number-of-changed-proteins)
+  - [Count number of changed amino acids (AAs)](#count-number-of-changed-amino-acids-aas)
+  - [Further comparison](#further-comparison)
 - [Benchmark](#benchmark)
   - [CPU/Memory consumption with 8 threads](#cpumemory-consumption-with-8-threads)
   - [Running time and required memory with different threads](#running-time-and-required-memory-with-different-threads)
@@ -279,6 +282,15 @@ optional arguments:
 # Outputs
 For more information, visit the [wiki](https://github.com/ATPs/PrecisionProDB/wiki) page.
 https://github.com/ATPs/PrecisionProDB/wiki
+
+## Count number of changed proteins
+The number of altered proteins will be shown during running PrecisonProDB. In the header line of "PREFIX.pergeno.protein_all.fa", a word "changed" or "unchanged" is at the end of the fasta header, and users may count the number of changed proteins based on this annotation.
+
+## Count number of changed amino acids (AAs)
+Generally, users may found annotations for variants in the "PREFIX.pergeno.aa_mutations.csv" file. Users may get the effects of different variants including AA subsitutions, insertions, deletions, stop-loss, stop-gain, and frame-changes.
+
+## Further comparison
+Users may use tools like https://github.com/pwilmart/fasta_utilities to further compare the difference of trypsin digested peptides.
 
 # Benchmark
 
