@@ -113,6 +113,8 @@ def getUniprotLatest():
 
     url_uniprot = [e for e in files2 if 'UP000005640_9606.fasta' in e][0]
     url_uniprot_additional = [e for e in files2 if 'UP000005640_9606_additional.fasta' in e][0]
+    url_uniprot = 'ftp://' + ftp_url + url_uniprot
+    url_uniprot_additional = 'ftp://' + ftp_url + url_uniprot_additional
 
     return url_uniprot, url_uniprot_additional
 
