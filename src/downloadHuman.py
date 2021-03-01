@@ -128,7 +128,11 @@ def downloadFile2folder(url, workfolder):
         # if os.path.exists(os.path.join(workfolder, basename)):
         #     print(basename, 'already downloaded in folder', workfolder, 'and will skip')
         #     return 0
-        os.system(f'cd {workfolder} && wget -c --retry-connrefused --waitretry=2 --read-timeout=40 --timeout=15 -t 20 {url}')
+        a = os.system(f'cd {workfolder} && wget -c --retry-connrefused --waitretry=2 --read-timeout=40 --timeout=15 -t 20 {url}')
+        # if not linux system, try to download with python lib
+        if a != 0:
+            import urllib 
+            urllib.request.urlretrieve(url, os.path.join(workfolder, os.path.basename(url)))
     except:
         print(url, 'cannot be downloaded, try to download yourself! Check the https://github.com/ATPs/PrecisionProDB for information. Use the latest version or contact the authors!')
         exit()
