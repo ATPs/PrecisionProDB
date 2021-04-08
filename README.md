@@ -4,39 +4,40 @@
 
 PrecisionProDB is a Python package for proteogenomics, which can generate a customized protein database for peptide search in mass spectrometry.
 
-
-For more information, visit the [**wiki**](https://github.com/ATPs/PrecisionProDB/wiki) page.
-
-
 - [PrecisionProDB](#precisionprodb)
 - [Description](#description)
 - [Installation](#installation)
   - [Install required packages with `conda`](#install-required-packages-with-conda)
   - [Install required packages with `pip`](#install-required-packages-with-pip)
-  - [install PrecisionProDB](#install-precisionprodb)
+  - [Install PrecisionProDB](#install-precisionprodb)
 - [Citing PrecisionProDB](#citing-precisionprodb)
 - [Usage Information](#usage-information)
   - [Typical usage](#typical-usage)
     - [The most simple case](#the-most-simple-case)
     - [VCF with multiple samples](#vcf-with-multiple-samples)
     - [VCF with local gene annotation](#vcf-with-local-gene-annotation)
-    - [variant file in text format](#variant-file-in-text-format)
-    - [user provided gene models](#user-provided-gene-models)
+    - [Variant file in text format](#variant-file-in-text-format)
+    - [User-provided gene models](#user-provided-gene-models)
   - [Testing with example files](#testing-with-example-files)
-    - [Variant file in text format](#variant-file-in-text-format-1)
     - [Variant file in VCF format](#variant-file-in-vcf-format)
-  - [get help information for each module](#get-help-information-for-each-module)
+    - [Variant file in text format](#variant-file-in-text-format-1)
+  - [Get help information for each module](#get-help-information-for-each-module)
 - [Outputs](#outputs)
+  - [Count number of changed proteins](#count-number-of-changed-proteins)
+  - [Count number of changed amino acids (AAs)](#count-number-of-changed-amino-acids-aas)
+  - [Further comparison](#further-comparison)
 - [Benchmark](#benchmark)
   - [CPU/Memory consumption with 8 threads](#cpumemory-consumption-with-8-threads)
   - [Running time and required memory with different threads](#running-time-and-required-memory-with-different-threads)
 - [PrecisionProDB_references](#precisionprodb_references)
 - [Contact Information](#contact-information)
 
+
 # Description
-The major goal is to generate personized protein sequences for protein identification in mass spectrometry (MS). 
-* PrecisionProDB supports multithreading, which improves the speed of the program. A typical customized human protein database can be generated in 15 to 20 mins using 8 threads.  
-* It is optimized for several widely used human gene models, including:
+The major goal of PrecisionProDB is to generate personized protein sequences for protein identification in mass spectrometry (MS). 
+Main features:
+* Supports multithreading, which improves the speed of the program. A typical customized human protein database can be generated in 15 to 20 mins using 8 threads.  
+* Optimized for several widely used human gene models, including:
   * [GENCODE](https://www.gencodegenes.org/human/): PrecisionProDB can download the latest version from `ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human`, as shown in `https://www.gencodegenes.org/human/`.
   * [RefSeq](https://www.ncbi.nlm.nih.gov/genome/guide/human/): PrecisionProDB can download the latest version from `ftp://ftp.ncbi.nlm.nih.gov/genomes/refseq/vertebrate_mammalian/Homo_sapiens/annotation_releases/current`
   * [Ensembl](https://useast.ensembl.org/Homo_sapiens/Info/Index): PrecisionProDB can download the latest version from:
@@ -44,13 +45,18 @@ The major goal is to generate personized protein sequences for protein identific
     * `ftp://ftp.ensembl.org/pub/current_gtf/homo_sapiens/`
     * `ftp://ftp.ensembl.org/pub/current_fasta/homo_sapiens/pep/`
   * [UniProt](https://www.uniprot.org/taxonomy/9606): PrecisionProDB can download the latest version from:
-    * `ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/reference_proteomes/Eukaryota/UP000005640_9606.fasta.gz`
-    * `ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/reference_proteomes/Eukaryota/UP000005640_9606_additional.fasta.gz`
+    * `ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/reference_proteomes/Eukaryota/`
+    * The files are `UP000005640/UP000005640_9606.fasta.gz` and `UP000005640/UP000005640_9606_additional.fasta.gz`, which may change in the future.
 * The non-standard codons and rare amino acids (e.g. Selenocysteine (**Sec** or **U**)) in the human genome can be properly incorporated.
-* It supports variant file in text or VCF format.
+* Internal stops (*) in proteins were reserved.
+* Supports variant file in text or VCF format.
 * All input files can be in compressed gzip (.gz) format.
-* It supports user generated gene models in GTF/GFF format. Species other than human are also supported.
+* Supports user generated gene models in GTF/GFF format. Species other than human are also supported.
   * For user-generated GTF files, protein annotations generated by [TransDecoder](https://github.com/TransDecoder/TransDecoder/wiki) was tested. 
+  * We provided [an example of running TransDecoder with example files](https://github.com/ATPs/PrecisionProDB/wiki/An-Example-of-Running-TransDecoder).
+
+The figure below shows how PrecisionProDB works:
+<img src="./media/Figs.design.complete.svg" width="900">
 
 # Installation
 
@@ -77,16 +83,17 @@ pip3 install numpy
 pip3 install pandas
 pip3 install biopython
 ```
-or  
+If the user has no root previlige on the system, the packages can be installed using the "--user" option:
+
 ```bash
 pip3 install numpy --user USER
 pip3 install pandas --user USER
 pip3 install biopython --user USER
 ```
-`USER` is the user name of the operating system to install these packages.
+`USER` is the user name on the operating system to install these packages.
 
 
-## install PrecisionProDB
+## Install PrecisionProDB
 
 To install the latest developments:
 ```bash
@@ -105,7 +112,7 @@ The manuscript of PrecisionProDB is submitted and this part will be updated soon
 ## Typical usage
 ### The most simple case
 
-We suppose that in most case, users will have a variant file in [VCF](https://samtools.github.io/hts-specs) format. If there is only one sample in the VCF format, the simplest command will be:
+We suppose that in most cases, users will have a variant file in [VCF](https://samtools.github.io/hts-specs) format. If there is only one sample in the VCF file, the simplest command will be:
 ```bash
 python Path_of_PrecisionProDB/src/PrecisionProDB.py -m Name_of_variant_file -D GENCODE -o Prefix_of_output
 ```
@@ -120,11 +127,11 @@ python Path_of_PrecisionProDB/src/PrecisionProDB.py -m Name_of_variant_file -D G
 ```
 
 ### VCF with local gene annotation
-If there is a local version of gene annotation from Ensembl, the command will be:
+If there is a local version of gene annotation files from Ensembl, the command will be:
 ```bash
 python Path_of_PrecisionProDB/src/PrecisionProDB.py -m Name_of_variant_file -o Prefix_of_output -s Sample_name -g Ensembl_Genome -p Ensembl_protein -f Ensembl_gtf -a Ensembl_GTF
 ```
-Ensembl_Genome, Ensembl_protein, and Ensembl_gtf are the locations of the Ensembl genome, protein, and GTF files, respectively. These files can be downloaded from Ensembl website as metioned previously, or use the `downloadHuman` module.
+Ensembl_Genome, Ensembl_protein, and Ensembl_gtf are the locations of the Ensembl genome, protein, and GTF files, respectively. These files can be downloaded from Ensembl website as metioned previously, or use the `downloadHuman` module in the package.
 ```bash
 python Path_of_PrecisionProDB/src/downloadHuman.py -d Ensembl -o Output_folder
 ```
@@ -152,7 +159,7 @@ If the variant file is in the tab-separated values ([TSV](https://en.wikipedia.o
 python Path_of_PrecisionProDB/src/PrecisionProDB.py -m Name_of_variant_file -D GENCODE -o Prefix_of_output
 ```
 
-- `Name_of_variant_file` is the name of the variant file. If the variant file ends with '.vcf' (case ignored), it will be treated as a [VCF](https://samtools.github.io/hts-specs) file. In all other cases a file will be treated as a [TSV](https://en.wikipedia.org/wiki/Tab-separated_values) file. Files end with '.gz' (e.g., '.vcf.gz' or '.tsv.gz') will be treated as gzip compressed files.
+- `Name_of_variant_file` is the name of the variant file. If the variant file ends with '.vcf' (case ignored), it will be treated as a [VCF](https://samtools.github.io/hts-specs) file, as described above. In all other cases a file will be treated as a [TSV](https://en.wikipedia.org/wiki/Tab-separated_values) file. Files end with '.gz' (e.g., '.vcf.gz' or '.tsv.gz') will be treated as gzip compressed files.
 - For text file format input, `-s` option will be ignored as there is only one sample.
 - Here, `-D` is set to be `GENCODE`. GENCODE related files will be downloaded.
 
@@ -164,21 +171,6 @@ python Path_of_PrecisionProDB/src/PrecisionProDB.py -m Name_of_variant_file -o P
 ```
 
 ## Testing with example files
-
-### Variant file in text format
-```bash
-cd Path_of_PrecisionProDB/examples
-python ../src/PrecisionProDB.py -m gnomAD.variant.txt.gz -g GENCODE.genome.fa.gz -p GENCODE.protein.fa.gz -f GENCODE.gtf.gz -o text_variant
-```
-Three files will be generated in the `examples` folder.
-- `text_variant.pergeno.aa_mutations.csv`: amino acid change annotations
-- `text_variant.pergeno.protein_all.fa`: all proteins after incoporating the variants.
-- `text_variant.pergeno.protein_changed.fa`: all proteins which are different from the input protein sequences after incoporating the variants.
-
-Note:
-* Protein names and descriptions in the fasta file are the same as in the input protein file, and the `Tab` symbol (`\t`) + `changed` or `unchanged` were added to indicate if the protein sequence is altered. 
-* e.g., `ENSP00000328207.6|ENST00000328596.10|ENSG00000186891.14|OTTHUMG00000001414|OTTHUMT00000004085.1|TNFRSF18-201|TNFRSF18|255  unchanged`, `ENSP00000424920.1|ENST00000502739.5|ENSG00000162458.13|OTTHUMG00000003079|OTTHUMT00000368044.1|FBLIM1-210|FBLIM1|144   changed`.
-
 
 ### Variant file in VCF format
 
@@ -208,6 +200,21 @@ Note:
   chr1    55299   C       T
   chr1    61442   A       G
   ```
+
+
+### Variant file in text format
+```bash
+cd Path_of_PrecisionProDB/examples
+python ../src/PrecisionProDB.py -m gnomAD.variant.txt.gz -g GENCODE.genome.fa.gz -p GENCODE.protein.fa.gz -f GENCODE.gtf.gz -o text_variant
+```
+Three files will be generated in the `examples` folder.
+- `text_variant.pergeno.aa_mutations.csv`: amino acid change annotations
+- `text_variant.pergeno.protein_all.fa`: all proteins after incoporating the variants.
+- `text_variant.pergeno.protein_changed.fa`: all proteins which are different from the input protein sequences after incoporating the variants.
+
+Note:
+* Protein names and descriptions in the fasta file are the same as in the input protein file, and the `Tab` symbol (`\t`) + `changed` or `unchanged` were added to indicate if the protein sequence is altered. 
+* e.g., `ENSP00000328207.6|ENST00000328596.10|ENSG00000186891.14|OTTHUMG00000001414|OTTHUMT00000004085.1|TNFRSF18-201|TNFRSF18|255  unchanged`, `ENSP00000424920.1|ENST00000502739.5|ENSG00000162458.13|OTTHUMG00000003079|OTTHUMT00000368044.1|FBLIM1-210|FBLIM1|144   changed`.
 
 
 ## Get help information for each module
@@ -259,14 +266,15 @@ optional arguments:
                         default keep variant in chromosomes and ignore those in short fragments of the genome. if set, use all chromosomes including fragments when
                         parsing the vcf file
   -D {GENCODE,RefSeq,Ensembl,Uniprot,}, --download {GENCODE,RefSeq,Ensembl,Uniprot,}
-                        download could be 'GENCODE','RefSeq','Ensembl','Uniprot'. If set, perGeno will try to download genome, gtf and protein files from the Internet.
-                        Download will be skipped if "--genome, --gtf, --protein, (--uniprot)" were all set. Settings from "--genome, --gtf, --protein, (--uniprot),
-                        --datatype" will not be used if the files were downloaded by perGeno. default "".
+                        download could be 'GENCODE','RefSeq','Ensembl','Uniprot'. If set, PrecisonProDB will try to download genome, gtf and protein files from the
+                        Internet. Download will be skipped if "--genome, --gtf, --protein, (--uniprot)" were all set. Settings from "--genome, --gtf, --protein,
+                        (--uniprot), --datatype" will not be used if the files were downloaded by PrecisonProDB. default "".
   -U UNIPROT, --uniprot UNIPROT
                         uniprot protein sequences. If more than one file, use "," to join the files. default "". For example, "UP000005640_9606.fasta.gz", or
                         "UP000005640_9606.fasta.gz,UP000005640_9606_additional.fasta"
   --uniprot_min_len UNIPROT_MIN_LEN
                         minimum length required when matching uniprot sequences to proteins annotated in the genome. default 20
+  --PEFF                If set, PEFF format file(s) will be generated. Default: do not generate PEFF file(s).
 
 
 ```
@@ -274,6 +282,15 @@ optional arguments:
 # Outputs
 For more information, visit the [wiki](https://github.com/ATPs/PrecisionProDB/wiki) page.
 https://github.com/ATPs/PrecisionProDB/wiki
+
+## Count number of changed proteins
+The number of altered proteins will be shown during running PrecisonProDB. In the header line of "PREFIX.pergeno.protein_all.fa", a word "changed" or "unchanged" is at the end of the fasta header, and users may count the number of changed proteins based on this annotation.
+
+## Count number of changed amino acids (AAs)
+Generally, users may found annotations for variants in the "PREFIX.pergeno.aa_mutations.csv" file. Users may get the effects of different variants including AA subsitutions, insertions, deletions, stop-loss, stop-gain, and frame-changes.
+
+## Further comparison
+Users may use tools like https://github.com/pwilmart/fasta_utilities to further compare the difference of trypsin digested peptides.
 
 # Benchmark
 
@@ -285,11 +302,11 @@ Tested with a computing node with Intel Xeon CPU E5-2695 v4 @ 2.10GHz and 256GB 
 
 ## CPU/Memory consumption with 8 threads
 
-<img src="./examples/CPU_MEM_vs_time.svg" width="900">
+<img src="./media/CPU_MEM_vs_time.svg" width="900">
 
 ## Running time and required memory with different threads
 
-<img src="./examples/Time_MEM_vs_threads.svg" width="900">
+<img src="./media/Time_MEM_vs_threads.svg" width="900">
 
 # PrecisionProDB_references
 

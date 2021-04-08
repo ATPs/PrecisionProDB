@@ -413,7 +413,7 @@ class PerChrom(object):
         locs = r['genomicLocs']
         locs = getPostionsFromLocs(locs)
         CDSplus = Seq(r['CDSplus'])
-        AA_seq = r['AA_seq']
+        AA_seq = r['AA_seq'].replace('*','_')
         AA_ori = AA_seq
         AA_translate = r['AA_translate']
         frame = int(r['frame'])
@@ -469,6 +469,7 @@ class PerChrom(object):
             if new_AA == AA_seq:
                 if frame != 0:
                     tdc_result['new_AA'] = 'X' + tdc_result['new_AA']
+                tdc_result['new_AA'] = tdc_result['new_AA'].replace('_','*')
                 return tdc_result
             # only AA change
             if len(new_AA) == len(AA_seq):
@@ -479,10 +480,13 @@ class PerChrom(object):
                         t_alt.loc[n, 'AA_alt'] = new_AA[n]
                         t_alt.loc[n, 'AA_index'] = n + 1
                         t_alt.loc[n, 'variants'] = ','.join(df_CDSplus.iloc[n*3:(n+1)*3]['variant_id'].dropna().drop_duplicates())
+                if frame !=0: 
+                    t_alt['AA_index'] = t_alt['AA_index'] + 1
                 tdc_result['n_variant_AA'] = t_alt.shape[0]
                 tdc_result['variant_AA'] = ';'.join(t_alt.apply(lambda x:x['AA_ref'] + str(int(x['AA_index'])) + x['AA_alt'] + '({})'.format(x['variants']), axis=1))
                 if frame != 0:
                     tdc_result['new_AA'] = 'X' + tdc_result['new_AA']
+                tdc_result['new_AA'] = tdc_result['new_AA'].replace('_','*')
                 return tdc_result
                 
         # translation with non-standard codons or complicate cases
@@ -498,7 +502,8 @@ class PerChrom(object):
         codons_alt = getCodons(df_CDSalt, AA_len=None)
         codons_ref['AA_ref'] = list(AA_seq)
         codons_ref['AA_index'] = list(range(1, AA_len+1))
-        if frame !=0: codons_ref['AA_index'] = codons_ref['AA_index'] + 1
+        if frame !=0: 
+            codons_ref['AA_index'] = codons_ref['AA_index'] + 1
         # add ref AA to codon_alt
         codons_alt = codons_alt.merge(codons_ref, left_on=['chr','strand','codon1'], right_on=['chr','strand','codon1'], how='left')
         codons_alt.columns = ['chr','strand','codon1', 'codon_alt','variants', 'codon_ref', 'variants_ref','AA_ref','AA_index']
@@ -524,7 +529,7 @@ class PerChrom(object):
         
         # check if there is a stop gain
         t_alt = codons_alt.iloc[:len(AA_seq)]
-        t_alt = t_alt[(t_alt['AA_alt'] == '*') & ((t_alt['variants'] != '') | t_alt['variants_ref'].notnull())]
+        t_alt = t_alt[((t_alt['AA_alt'] == '*') & (t_alt['AA_ref'] != '*')) & ((t_alt['variants'] != '') | t_alt['variants_ref'].notnull())]
         if t_alt.shape[0] > 0:
             stopGain = True
             x = t_alt.iloc[0].copy()
@@ -598,7 +603,7 @@ class PerChrom(object):
                     print('input AA', AA_ori)
                     print('translated AA', new_AA)
         
-        tdc_result['new_AA'] = new_AA
+        tdc_result['new_AA'] = new_AA.replace('_','*')
         tdc_result['frameChange'] = frameChange
         tdc_result['stopGain'] = stopGain
         tdc_result['AA_stopGain'] = AA_stopGain
