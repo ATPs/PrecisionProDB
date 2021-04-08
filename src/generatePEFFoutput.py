@@ -96,7 +96,7 @@ def generatePEFFoutput(file_protein, file_mutation, file_out, TEST=False):
     df_mutation = df_mutation[df_mutation['variant_AA'].notnull()]
 
     # get proteins with mutations
-    proteins_mutated = {k:v for k,v in df_mutation.groupby('protein_id_fasta')}
+    proteins_mutated = {k:v for k,v in df_mutation.groupby('protein_id_ori')}
 
     # read in protein sequences to dict
     dc_pr = SeqIO.to_dict(SeqIO.parse(openFile(file_protein), 'fasta'))
