@@ -9,7 +9,7 @@ PrecisionProDB is a Python package for proteogenomics, which can generate a cust
 - [Installation](#installation)
   - [Install required packages with `conda`](#install-required-packages-with-conda)
   - [Install required packages with `pip`](#install-required-packages-with-pip)
-  - [install PrecisionProDB](#install-precisionprodb)
+  - [Install PrecisionProDB](#install-precisionprodb)
 - [Citing PrecisionProDB](#citing-precisionprodb)
 - [Usage Information](#usage-information)
   - [Typical usage](#typical-usage)
@@ -93,7 +93,7 @@ pip3 install biopython --user USER
 `USER` is the user name on the operating system to install these packages.
 
 
-## install PrecisionProDB
+## Install PrecisionProDB
 
 To install the latest developments:
 ```bash
