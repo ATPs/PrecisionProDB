@@ -103,7 +103,8 @@ git clone https://github.com/ATPs/PrecisionProDB.git
 To install other verisons, download from the [release page](https://github.com/ATPs/PrecisionProDB/releases) directly.
 
 # Citing PrecisionProDB
-The manuscript of PrecisionProDB is submitted and this part will be updated soon.
+
+Xiaolong Cao, Jinchuan Xing, PrecisionProDB: improving the proteomics performance for precision medicine, Bioinformatics, 2021;, btab218, https://doi.org/10.1093/bioinformatics/btab218
 
 # Usage Information
 
