@@ -56,7 +56,7 @@ Main features:
   * We provided [an example of running TransDecoder with example files](https://github.com/ATPs/PrecisionProDB/wiki/An-Example-of-Running-TransDecoder).
 
 The figure below shows how PrecisionProDB works:
-<img src="./media/Figs.design.complete.svg" width="900">
+<img src="./media/Figs.design.complete.png" width="900">
 
 # Installation
 
