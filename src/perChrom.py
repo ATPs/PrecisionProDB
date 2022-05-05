@@ -214,6 +214,9 @@ def get_df_transcript2(file_gtf, file_protein, file_genome,cpu_counts,datatype):
     if datatype == 'gtf':
         strand_n = df_transcript2.apply(getStrand, axis=1)
         df_transcript2['strand'] = strand_n
+        # 20220505 fix a bug. Need to correct strand in df_gtf
+        df_gtf['strand'] = df_gtf['protein_id'].map(strand_n.to_dict())
+
 
     # get CDSplus sequences
     df_gtf_group = {k:v for k,v in df_gtf.groupby('protein_id') }
@@ -305,8 +308,8 @@ class PerChrom(object):
         results = []
         for genomicStart, genomicEnd in genomicLocs:
             genomicStart = genomicStart + 1
-            tdf = tdf[(tdf['pos'] >= genomicStart) & (tdf['pos'] <= genomicEnd) & (tdf['pos_end'] >= genomicStart) & (tdf['pos_end'] <= genomicEnd)]
-            results += list(tdf.index)
+            tdf1 = tdf[(tdf['pos'] >= genomicStart) & (tdf['pos'] <= genomicEnd) & (tdf['pos_end'] >= genomicStart) & (tdf['pos_end'] <= genomicEnd)]
+            results += list(tdf1.index)
         return results
 
     def getMutations_faster(self, transcript_id):
