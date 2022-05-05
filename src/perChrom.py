@@ -491,6 +491,11 @@ class PerChrom(object):
                     tdc_result['new_AA'] = 'X' + tdc_result['new_AA']
                 tdc_result['new_AA'] = tdc_result['new_AA'].replace('_','*')
                 return tdc_result
+        else:
+            if 'U' in AA_seq:
+                print(f'{transcript_id} with selenocysteine, special case')
+            else:
+                print(f'warning! protein {transcript_id}, the original provided protein sequence is {AA_seq} and translated protein sequence from the GTF annotation is {AA_translate}')
                 
         # translation with non-standard codons or complicate cases
         df_CDSref = df_CDSplus[['locs', 'bases', 'chr', 'strand','variant_id']].copy()
