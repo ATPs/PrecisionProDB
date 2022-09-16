@@ -143,7 +143,7 @@ Output_folder is the path of output folder to store the downloaded files.
 If the variant file is in the tab-separated values ([TSV](https://en.wikipedia.org/wiki/Tab-separated_values)) format, 
 - it needs to include a header row, with at least four columns: `chr`, `pos`, `ref`, `alt`. There is no requirement for the order of these columns, as `pandas` was used to parse the file.
 - additional columns are allowed, but will be ignored.
-- the `chr`, `pos`, `ref` and `alt` columns were coded in the VCF format. This means that for deletions, it should be written as `chr1 10146 AC A`, rather than `chr1 10147 C . `.
+- the `chr`, `pos`, `ref` and `alt` columns were coded in the VCF format. This means that for deletions, it should be written as `chr1 10146 AC A`, rather than `chr1 10147 C . `. Also, the `pos` is 1-based like in the VCF file, not 0-based (in bed file).
 
 - The most simple text file looks like:
 
