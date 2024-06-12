@@ -104,7 +104,7 @@ To install other verisons, download from the [release page](https://github.com/A
 
 # Citing PrecisionProDB
 
-Xiaolong Cao, Jinchuan Xing, PrecisionProDB: improving the proteomics performance for precision medicine, Bioinformatics, 2021;, btab218, https://doi.org/10.1093/bioinformatics/btab218
+Xiaolong Cao, Jinchuan Xing, PrecisionProDB: improving the proteomics performance for precision medicine, Bioinformatics, Volume 37, Issue 19, October 2021, Pages 3361–3363, https://doi.org/10.1093/bioinformatics/btab218
 
 # Usage Information
 
