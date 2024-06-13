@@ -29,7 +29,7 @@ PrecisionProDB is a Python package for proteogenomics, which can generate a cust
 - [Benchmark](#benchmark)
   - [CPU/Memory consumption with 8 threads](#cpumemory-consumption-with-8-threads)
   - [Running time and required memory with different threads](#running-time-and-required-memory-with-different-threads)
-- [PrecisionProDB_references](#precisionprodb_references)
+- [PrecisionProDB\_references](#precisionprodb_references)
 - [Contact Information](#contact-information)
 
 
@@ -279,6 +279,11 @@ optional arguments:
 
 
 ```
+
+**Notes**
+- `-p PROTEIN, --protein PROTEIN` is a file with proteins matching the GTF file provided!
+- `-k PROTEIN_KEYWORD` is a keyword used to match the GTF file and the protein sequences. If not provided, the program will try to determine the keyword based on the datatype. The program needs the data to know the location of proteins in the genome, and codon matches to allow non-standard codons.
+- `-a {GENCODE_GTF,GENCODE_GFF3,RefSeq,Ensembl_GTF,gtf}, --datatype {GENCODE_GTF,GENCODE_GFF3,RefSeq,Ensembl_GTF,gtf}` should be set if you use the format above. For "gtf" format, the `PROTEIN_KEYWORD` and `PROTEIN` should match.
 
 # Outputs
 For more information, visit the [wiki](https://github.com/ATPs/PrecisionProDB/wiki) page.
