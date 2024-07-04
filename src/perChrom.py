@@ -522,7 +522,8 @@ class PerChrom(object):
 
         codons_alt.loc[codons_alt.duplicated('AA_index'),['codon_ref','AA_ref','AA_index']] = np.NaN # only use each AA_ref Once
         codons_alt['AA_alt'] = codons_alt.apply(lambda x:x['AA_ref'] if x['codon_alt'] == x['codon_ref'] else str(Seq(x['codon_alt']).translate()), axis=1)
-        codons_alt['AA_index'] = codons_alt['AA_index'].fillna(method='ffill')
+        # codons_alt['AA_index'] = codons_alt['AA_index'].fillna(method='ffill')
+        codons_alt['AA_index'] = codons_alt['AA_index'].ffill()
         new_AA = str(''.join(codons_alt['AA_alt']).split('*')[0])
         
         # check if final reading frame is the same
