@@ -64,7 +64,8 @@ class PerGeno(object):
                     threads = os.cpu_count(),
                     outprefix = 'perGeno',
                     datatype = 'gtf',
-                    protein_keyword = 'auto'
+                    protein_keyword = 'auto',
+                    keep_all = False
                 ):
         # variable from input
         self.file_genome = file_genome # genome file location
@@ -75,6 +76,7 @@ class PerGeno(object):
         self.outprefix = outprefix # where to store the results
         self.datatype = datatype # input datatype, could be GENCODE_GTF, GENCODE_GFF3, RefSeq or gtf
         self.protein_keyword = protein_keyword #protein_keyword, field name in attribute column of gtf file to determine ids for proteins. default "auto", determine the protein_keyword based on datatype. "transcript_id" for GENCODE_GTF, "protein_id" for "RefSeq" and "Parent" for gtf and GENCODE_GFF3
+        self.keep_all = keep_all
 
         # determine datatype
         self.datatype = self.determineInputType()
@@ -578,7 +580,11 @@ class PerGeno(object):
         fout_proteins_all.close()
         
         # clear temp folder
-        shutil.rmtree(self.tempfolder)
+        if self.keep_all:
+            print('keep all intermediate files')
+        else:
+            print('remove temp folder')
+            shutil.rmtree(self.tempfolder)
 
         print('finished!')
 
@@ -598,6 +604,8 @@ if __name__ == '__main__':
     parser.add_argument('-o', '--out', help='''output prefix. Three files will be saved, including the annotation for mutated transcripts, the mutated or all protein sequences. {out}.pergeno.aa_mutations.csv, {out}.pergeno.protein_all.fa, {out}.protein_changed.fa. default "perGeno" ''', default="perGeno")
     parser.add_argument('-a', '--datatype', help='''input datatype, could be GENCODE_GTF, GENCODE_GFF3, RefSeq, Ensembl_GTF or gtf. default "gtf". Ensembl_GFF3 is not supported. ''', default='gtf', type=str, choices=['GENCODE_GTF', 'GENCODE_GFF3','RefSeq','Ensembl_GTF','gtf'])
     parser.add_argument('-k','--protein_keyword', help='''field name in attribute column of gtf file to determine ids for proteins. default "auto", determine the protein_keyword based on datatype. "transcript_id" for GENCODE_GTF, "protein_id" for "RefSeq" and "Parent" for gtf and GENCODE_GFF3 ''', default='auto')
+    parser.add_argument('--keep_all', help='If set, do not delete files generated during the run', action='store_true')
+
     f = parser.parse_args()
     
     file_genome = f.genome
@@ -608,9 +616,10 @@ if __name__ == '__main__':
     outprefix = f.out
     datatype = f.datatype
     protein_keyword = f.protein_keyword
+    keep_all = f.keep_all
     
-    pergeno = PerGeno(file_genome = file_genome, file_gtf=file_gtf, file_mutations = file_mutations, file_protein=file_protein, threads=threads, outprefix=outprefix, datatype=datatype, protein_keyword=protein_keyword)
-    #print(pergeno.__dict__)
+    pergeno = PerGeno(file_genome = file_genome, file_gtf=file_gtf, file_mutations = file_mutations, file_protein=file_protein, threads=threads, outprefix=outprefix, datatype=datatype, protein_keyword=protein_keyword, keep_all = keep_all)
+    # print(pergeno.__dict__)
     pergeno.splitInputByChromosomes()
     #print(pergeno.__dict__)
     pergeno.runPerChom()

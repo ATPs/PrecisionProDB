@@ -35,7 +35,8 @@ def runPerGenoVCF(
                     protein_keyword = 'auto',
                     filter_PASS = True,
                     individual = None,
-                    chromosome_only = True
+                    chromosome_only = True,
+                    keep_all = False
                 ):
     '''
     run perGeno with a vcf file as variant input
@@ -51,14 +52,16 @@ def runPerGenoVCF(
     # run perGeno for mutations_1
     print('start running PrecisionProDB for first strand of the genome mutation file')
     outprefix_1 = outprefix + '_1'
-    pergeno_1 = PerGeno(file_genome = file_genome, file_gtf=file_gtf, file_mutations = file_mutations_1, file_protein=file_protein, threads=threads, outprefix=outprefix_1, datatype=datatype, protein_keyword=protein_keyword)
+    pergeno_1 = PerGeno(file_genome = file_genome, file_gtf=file_gtf, file_mutations = file_mutations_1, file_protein=file_protein, threads=threads, outprefix=outprefix_1, datatype=datatype, protein_keyword=protein_keyword, keep_all=keep_all)
+    print(pergeno_1.__dict__)
     pergeno_1.splitInputByChromosomes()
     pergeno_1.runPerChom()
 
     # run perGeno for mutations_2
     print('start running PrecisionProDB for second strand of the genome mutation file')
     outprefix_2 = outprefix + '_2'
-    pergeno_2 = PerGeno(file_genome = file_genome, file_gtf=file_gtf, file_mutations = file_mutations_2, file_protein=file_protein, threads=threads, outprefix=outprefix_2, datatype=datatype, protein_keyword=protein_keyword)
+    pergeno_2 = PerGeno(file_genome = file_genome, file_gtf=file_gtf, file_mutations = file_mutations_2, file_protein=file_protein, threads=threads, outprefix=outprefix_2, datatype=datatype, protein_keyword=protein_keyword, keep_all=keep_all)
+    print(pergeno_1.__dict__)
     pergeno_2.splitInputByChromosomes()
     pergeno_2.runPerChom()
 
@@ -145,6 +148,8 @@ if __name__ == '__main__':
     parser.add_argument('-F', '--no_filter', help='default only keep variant with value "PASS" FILTER column of vcf file. if set, do not filter', action='store_true')
     parser.add_argument('-s', '--sample', help='sample name in the vcf to extract the variant information. default: None, extract the first sample', default=None)
     parser.add_argument('-A','--all_chromosomes', help='default keep variant in chromosomes and ignore those in short fragments of the genome. if set, use all chromosomes including fragments when parsing the vcf file', action='store_true')
+    parser.add_argument('--keep_all', help='If set, do not delete files generated during the run', action='store_true')
+
     f = parser.parse_args()
     
     file_genome = f.genome
@@ -158,6 +163,8 @@ if __name__ == '__main__':
     filter_PASS = not f.no_filter
     individual = f.sample
     chromosome_only = not f.all_chromosomes
+    keep_all = f.keep_all
+
     print(f)
 
-    runPerGenoVCF(file_genome = file_genome, file_gtf=file_gtf, file_mutations = file_mutations, file_protein=file_protein, threads=threads, outprefix=outprefix, datatype=datatype, protein_keyword=protein_keyword, filter_PASS=filter_PASS, individual=individual, chromosome_only=chromosome_only)
+    runPerGenoVCF(file_genome = file_genome, file_gtf=file_gtf, file_mutations = file_mutations, file_protein=file_protein, threads=threads, outprefix=outprefix, datatype=datatype, protein_keyword=protein_keyword, filter_PASS=filter_PASS, individual=individual, chromosome_only=chromosome_only, keep_all=keep_all)
