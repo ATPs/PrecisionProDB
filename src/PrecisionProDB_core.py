@@ -617,8 +617,18 @@ if __name__ == '__main__':
     datatype = f.datatype
     protein_keyword = f.protein_keyword
     keep_all = f.keep_all
-    
-    pergeno = PerGeno(file_genome = file_genome, file_gtf=file_gtf, file_mutations = file_mutations, file_protein=file_protein, threads=threads, outprefix=outprefix, datatype=datatype, protein_keyword=protein_keyword, keep_all = keep_all)
+
+    pergeno = PerGeno(
+        file_genome = file_genome, 
+        file_gtf=file_gtf, 
+        file_mutations = file_mutations, 
+        file_protein=file_protein, 
+        threads=threads, 
+        outprefix=outprefix, 
+        datatype=datatype, 
+        protein_keyword=protein_keyword, 
+        keep_all = keep_all
+        )
     # print(pergeno.__dict__)
     pergeno.splitInputByChromosomes()
     #print(pergeno.__dict__)

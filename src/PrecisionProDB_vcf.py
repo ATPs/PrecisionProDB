@@ -167,4 +167,17 @@ if __name__ == '__main__':
 
     print(f)
 
-    runPerGenoVCF(file_genome = file_genome, file_gtf=file_gtf, file_mutations = file_mutations, file_protein=file_protein, threads=threads, outprefix=outprefix, datatype=datatype, protein_keyword=protein_keyword, filter_PASS=filter_PASS, individual=individual, chromosome_only=chromosome_only, keep_all=keep_all)
+    runPerGenoVCF(
+        file_genome = file_genome, 
+        file_gtf=file_gtf, 
+        file_mutations = file_mutations, 
+        file_protein=file_protein, 
+        threads=threads, 
+        outprefix=outprefix, 
+        datatype=datatype, 
+        protein_keyword=protein_keyword, 
+        filter_PASS=filter_PASS, 
+        individual=individual, 
+        chromosome_only=chromosome_only, 
+        keep_all=keep_all
+        )

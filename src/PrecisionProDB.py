@@ -29,6 +29,7 @@ if __name__ == '__main__':
     parser.add_argument('--uniprot_min_len', help='''minimum length required when matching uniprot sequences to proteins annotated in the genome. default 20 ''', default=20, type=int)
     parser.add_argument('--PEFF', help='If set, PEFF format file(s) will be generated. Default: do not generate PEFF file(s).', action='store_true')
     parser.add_argument('--keep_all', help='If set, do not delete files generated during the run', action='store_true')
+    parser.add_argument('-S','--sqlite', help='''A path of sqlite file for re-use of annotation info. default '', do not use sqlite. The program will create a sqlite file if the file does not exist. If the file already exists, the program will use data stored in the file. It will cause error if the content in the sqlite file is not as expected. ''', default='', type=str)
 
     
     f = parser.parse_args()
@@ -48,6 +49,7 @@ if __name__ == '__main__':
     files_uniprot = f.uniprot
     uniprot_min_len=f.uniprot_min_len
     keep_all = f.keep_all
+    file_sqlite = f.sqlite
     print(f)
     
     time0 = time.time()
@@ -93,10 +95,33 @@ if __name__ == '__main__':
 
     if file_mutations.lower().endswith('.vcf') or file_mutations.lower().endswith('.vcf.gz'):
         print('variant file is a vcf file')
-        runPerGenoVCF(file_genome = file_genome, file_gtf=file_gtf, file_mutations = file_mutations, file_protein=file_protein, threads=threads, outprefix=outprefix, datatype=datatype, protein_keyword=protein_keyword, filter_PASS=filter_PASS, individual=individual, chromosome_only=chromosome_only, keep_all=keep_all)
+        runPerGenoVCF(
+            file_genome = file_genome, 
+            file_gtf=file_gtf, 
+            file_mutations = file_mutations, 
+            file_protein=file_protein, 
+            threads=threads, 
+            outprefix=outprefix, 
+            datatype=datatype, 
+            protein_keyword=protein_keyword, 
+            filter_PASS=filter_PASS, 
+            individual=individual, 
+            chromosome_only=chromosome_only, 
+            keep_all=keep_all
+            )
     else:
         print('variant file is a tsv file')
-        pergeno = PerGeno(file_genome = file_genome, file_gtf=file_gtf, file_mutations = file_mutations, file_protein=file_protein, threads=threads, outprefix=outprefix, datatype=datatype, protein_keyword=protein_keyword, keep_all=keep_all)
+        pergeno = PerGeno(
+            file_genome = file_genome, 
+            file_gtf=file_gtf, 
+            file_mutations = file_mutations, 
+            file_protein=file_protein, 
+            threads=threads, 
+            outprefix=outprefix, 
+            datatype=datatype, 
+            protein_keyword=protein_keyword, 
+            keep_all=keep_all
+            )
         #print(pergeno.__dict__)
         pergeno.splitInputByChromosomes()
         #print(pergeno.__dict__)
