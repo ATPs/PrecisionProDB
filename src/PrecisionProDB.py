@@ -96,7 +96,7 @@ if __name__ == '__main__':
         runPerGenoVCF(file_genome = file_genome, file_gtf=file_gtf, file_mutations = file_mutations, file_protein=file_protein, threads=threads, outprefix=outprefix, datatype=datatype, protein_keyword=protein_keyword, filter_PASS=filter_PASS, individual=individual, chromosome_only=chromosome_only, keep_all=keep_all)
     else:
         print('variant file is a tsv file')
-        pergeno = PerGeno(file_genome = file_genome, file_gtf=file_gtf, file_mutations = file_mutations, file_protein=file_protein, threads=threads, outprefix=outprefix, datatype=datatype, protein_keyword=protein_keyword)
+        pergeno = PerGeno(file_genome = file_genome, file_gtf=file_gtf, file_mutations = file_mutations, file_protein=file_protein, threads=threads, outprefix=outprefix, datatype=datatype, protein_keyword=protein_keyword, keep_all=keep_all)
         #print(pergeno.__dict__)
         pergeno.splitInputByChromosomes()
         #print(pergeno.__dict__)
