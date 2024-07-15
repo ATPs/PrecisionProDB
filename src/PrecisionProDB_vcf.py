@@ -123,12 +123,13 @@ def runPerGenoVCF(
     df_mutations.to_csv(fout_mutations, sep='\t',index=None)
 
     # clean up files
-    os.remove(fout_mutations_1)
-    os.remove(fout_mutations_2)
-    os.remove(fout_protein_changed_1)
-    os.remove(fout_protein_changed_2)
-    os.remove(fout_protein_all_1)
-    os.remove(fout_protein_all_2)
+    if not keep_all:
+        os.remove(fout_mutations_1)
+        os.remove(fout_mutations_2)
+        os.remove(fout_protein_changed_1)
+        os.remove(fout_protein_changed_2)
+        os.remove(fout_protein_all_1)
+        os.remove(fout_protein_all_2)
     print('perGeno_vcf finished!')
 
 

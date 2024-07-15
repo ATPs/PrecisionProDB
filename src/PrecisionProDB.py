@@ -3,6 +3,7 @@ from PrecisionProDB_vcf import runPerGenoVCF
 import os
 import downloadHuman
 import time
+import sys
 
 description = '''
 PrecisionProDB, a personal proteogenomic tool which outputs a new reference protein based on the variants data. 
@@ -92,41 +93,45 @@ if __name__ == '__main__':
                 datatype = 'Ensembl_GTF'
 
 
-
-    if file_mutations.lower().endswith('.vcf') or file_mutations.lower().endswith('.vcf.gz'):
-        print('variant file is a vcf file')
-        runPerGenoVCF(
-            file_genome = file_genome, 
-            file_gtf=file_gtf, 
-            file_mutations = file_mutations, 
-            file_protein=file_protein, 
-            threads=threads, 
-            outprefix=outprefix, 
-            datatype=datatype, 
-            protein_keyword=protein_keyword, 
-            filter_PASS=filter_PASS, 
-            individual=individual, 
-            chromosome_only=chromosome_only, 
-            keep_all=keep_all
-            )
+    if file_sqlite == '':
+        if file_mutations.lower().endswith('.vcf') or file_mutations.lower().endswith('.vcf.gz'):
+            print('variant file is a vcf file')
+            runPerGenoVCF(
+                file_genome = file_genome, 
+                file_gtf=file_gtf, 
+                file_mutations = file_mutations, 
+                file_protein=file_protein, 
+                threads=threads, 
+                outprefix=outprefix, 
+                datatype=datatype, 
+                protein_keyword=protein_keyword, 
+                filter_PASS=filter_PASS, 
+                individual=individual, 
+                chromosome_only=chromosome_only, 
+                keep_all=keep_all
+                )
+        else:
+            print('variant file is a tsv file')
+            pergeno = PerGeno(
+                file_genome = file_genome, 
+                file_gtf=file_gtf, 
+                file_mutations = file_mutations, 
+                file_protein=file_protein, 
+                threads=threads, 
+                outprefix=outprefix, 
+                datatype=datatype, 
+                protein_keyword=protein_keyword, 
+                keep_all=keep_all
+                )
+            #print(pergeno.__dict__)
+            pergeno.splitInputByChromosomes()
+            #print(pergeno.__dict__)
+            pergeno.runPerChom()
     else:
-        print('variant file is a tsv file')
-        pergeno = PerGeno(
-            file_genome = file_genome, 
-            file_gtf=file_gtf, 
-            file_mutations = file_mutations, 
-            file_protein=file_protein, 
-            threads=threads, 
-            outprefix=outprefix, 
-            datatype=datatype, 
-            protein_keyword=protein_keyword, 
-            keep_all=keep_all
-            )
-        #print(pergeno.__dict__)
-        pergeno.splitInputByChromosomes()
-        #print(pergeno.__dict__)
-        pergeno.runPerChom()
-    
+        # use Sqlite
+        import PrecisionProDB_Sqlite
+        PrecisionProDB_Sqlite.main(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite)
+
     # deal with uniprot
     if download == 'UNIPROT':
         print('try to extract Uniprot proteins from Ensembl models')
