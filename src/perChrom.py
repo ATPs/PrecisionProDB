@@ -6,7 +6,7 @@ import numpy as np
 from multiprocessing import Pool
 import os
 import time
-
+import numpy as np
 
 def openFile(filename):
     '''open text or gzipped text file
@@ -158,7 +158,7 @@ def getCodons(ttdf, AA_len=None):
 
 
 # get loc for each nt in CDSplus
-def getPostionsFromLocs(locs):
+def getPositionsFromLocs(locs):
     '''
     locs like [(65564, 65573), (69036, 71585)]
     return a list of positions
@@ -168,6 +168,16 @@ def getPostionsFromLocs(locs):
         results = results + list(range(s+1, e+1))#Note, there is a -1 operation for genomicLocs above
     return results
 
+def getPositionsFromLocs_faster(locs):
+    '''
+    locs like [(65564, 65573), (69036, 71585)]
+    return a list of positions
+    '''
+    result_arrays = []
+    for s, e in locs:
+        result_arrays.append(np.arange(s+1, e+1))  # Create a range for each (s,e) pair
+    
+    return list(np.concatenate(result_arrays))  # Concatenate all arrays into a single NumPy array
 
 def get_df_transcript2(file_gtf, file_protein, file_genome,cpu_counts,datatype):
     '''
@@ -289,10 +299,27 @@ class PerChrom(object):
         self.chromosome = chromosome # chromosome name
         
         # dataframe to store the mutation information
-        self.df_mutations = parse_mutation(file_mutations=self.file_mutations, chromosome=self.chromosome)
+        if self.file_mutations:
+            self.df_mutations = parse_mutation(file_mutations=self.file_mutations, chromosome=self.chromosome)
+        else:
+            print(self.chromosome, 'No mutation file provided, will not do mutation analysis')
         # dataframe to store all transcript info
         self.df_transcript2 = get_df_transcript2(file_gtf=self.file_gtf, file_protein=self.file_protein, file_genome=self.file_genome,cpu_counts=self.threads,datatype=self.datatype)
         self.df_transcript2['seqname'] = self.chromosome
+        self.further_process_df_transcript2()
+
+    def further_process_df_transcript2(self):
+        '''add more annotations to df_transcript2
+        '''
+        # add column "AA_translate"
+        cpu_counts = self.threads
+        pool = Pool(cpu_counts)
+        self.df_transcript2['AA_translate'] = pool.map(self.translateCDSplus, self.df_transcript2.index)
+        pool.close()
+        pool.join()
+        # change 'frame' to int
+        self.df_transcript2['frame'] = self.df_transcript2['frame'].astype(int)
+
 
 
     def getMutations(self, transcript_id):
@@ -402,27 +429,25 @@ class PerChrom(object):
         tdf_m.columns = ['chr','pos','ref','alt','variant_id']
         return tdf_m
 
-
-    def translateCDSplusWithMut(self, transcript_id):
+    def create_df_CDSplus_for_transcript_id(self, transcript_id):
         '''
         transcript_id is index in df_transcript3
-        translate CDSplus based on CDSplus and frame, and mutations
+        create a dataframe for CDSplus, with chr, pos, ref, alt, variant_id
         '''
         chromosome = self.chromosome
         df_transcript2 = self.df_transcript2
 
-        tdc_result = {}
         r = df_transcript2.loc[transcript_id]
         locs = r['genomicLocs']
-        locs = getPostionsFromLocs(locs)
+        locs = getPositionsFromLocs_faster(locs)
         CDSplus = Seq(r['CDSplus'])
-        AA_seq = r['AA_seq'].replace('*','_')
+        AA_seq = r['AA_seq'].replace('*','_')# in the middle of some sequences, the stop codon is marked as *
         AA_ori = AA_seq
         AA_translate = r['AA_translate']
         frame = int(r['frame'])
         strand = r['strand']
-        mutations = r['mutations']
-        tdf_m = self.getMut(mutations, strand)
+        # mutations = r['mutations']
+        # tdf_m = self.getMut(mutations, strand)
         
         # sometimes the AA sequences for example ENSP00000466819, is longer than the CDSplus. skip.
         if len(AA_seq.strip('X'))*3 > len(CDSplus):
@@ -441,15 +466,43 @@ class PerChrom(object):
 
         # check if with non-standard stop codon. keep the non-standard stop codon by trim CDSplus and locs
         if AA_len < len(AA_translate) and len(CDSplus)/3 - AA_len > 1:#translation stop not at stop codon
-            tdc_result['nonStandardStopCodon'] = 1
+            # tdc_result['nonStandardStopCodon'] = 1
+            nonStandardStopCodon = 1
             CDSplus = CDSplus[:3*AA_len]
             locs = locs[:3*AA_len]
+        else:
+            nonStandardStopCodon = 0
         
         df_CDSplus = pd.DataFrame()
         df_CDSplus['locs'] = locs
         df_CDSplus['bases'] = list(CDSplus)
         df_CDSplus['chr'] = chromosome
         df_CDSplus['strand'] = strand
+        return df_CDSplus, AA_seq, AA_ori, AA_translate, nonStandardStopCodon
+
+    def translateCDSplusWithMut(self, transcript_id):
+        '''
+        transcript_id is index in df_transcript3
+        translate CDSplus based on CDSplus and frame, and mutations
+        '''
+        chromosome = self.chromosome
+        df_transcript2 = self.df_transcript2
+
+        tdc_result = {}
+        r = df_transcript2.loc[transcript_id]
+        # locs = r['genomicLocs']
+        # locs = getPositionsFromLocs_faster(locs)
+        # CDSplus = Seq(r['CDSplus'])
+        # AA_seq = r['AA_seq'].replace('*','_')# in the middle of some sequences, the stop codon is marked as *
+        # AA_ori = AA_seq
+        # AA_translate = r['AA_translate']
+        frame = int(r['frame'])
+        strand = r['strand']
+        mutations = r['mutations']
+        tdf_m = self.getMut(mutations, strand)
+        
+        df_CDSplus, AA_seq, AA_ori, AA_translate, nonStandardStopCodon = self.create_df_CDSplus_for_transcript_id(transcript_id)
+        tdc_result['nonStandardStopCodon'] = nonStandardStopCodon
         # include mutation data
         df_CDSplus = df_CDSplus.merge(tdf_m, how='left', left_on = ['chr','locs', 'bases'], right_on=['chr','pos','ref'])
         # number of variant in CDSplus
@@ -463,8 +516,9 @@ class PerChrom(object):
             if df_CDSplus.iloc[1]['new_nt'] == '':
                 df_CDSplus.loc[1,'new_nt'] = df_CDSplus.iloc[1]['ref']
         
-        # if no special condon, translate directly
+        # if no special codon, translate directly
         if AA_seq in AA_translate:
+            # AA_seq may be shorter than AA_translate, because for annotation, the sequence may end before the stop codon
             CDSnew = ''.join(df_CDSplus['new_nt'])
             new_AA = str(Seq(CDSnew[:3*(len(CDSnew) // 3)]).translate().split('*')[0])
             tdc_result['new_AA'] = new_AA
@@ -652,16 +706,16 @@ class PerChrom(object):
         # add column 'mutations' to df_transcript2, which stores index on the mutations in df_mutations
         # add column 'mutations', with list of mutation index in df_mutations
         pool = Pool(cpu_counts)
-        results = pool.map(self.getMutations_faster, df_transcript2.index)
+        results = pool.map(self.getMutations, df_transcript2.index)
         pool.close()
         pool.join()
         df_transcript2['mutations'] = results
         
         # add column 'AA_translate'
-        pool = Pool(cpu_counts)
-        df_transcript2['AA_translate'] = pool.map(self.translateCDSplus, df_transcript2.index)
-        pool.close()
-        pool.join()
+        # pool = Pool(cpu_counts)
+        # df_transcript2['AA_translate'] = pool.map(self.translateCDSplus, df_transcript2.index)
+        # pool.close()
+        # pool.join()
         
         # for RefSeq, sometimes the GTF annotation does not agree with the protein sequence, which means the len(CDS)/len(protein) != 3, find those cases and do not change the proteins
         if datatype == 'RefSeq':
