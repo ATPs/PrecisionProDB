@@ -73,7 +73,7 @@ Otherwise, it is recommended to use the [conda](https://github.com/conda/conda) 
 ```bash
 conda install numpy
 conda install pandas
-conda install -c anaconda biopython
+conda install -c conda-forge biopython
 ```
 ## Install required packages with `pip`
 If `conda` is not installed, `pip` (or `pip3` as Python3 is required) can be used. `pip` is already installed if you are using Python3 >=3.4 downloaded from python.org.
