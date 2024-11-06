@@ -295,13 +295,14 @@ class PerGeno(object):
         tf_proteins_not_in_genome.close()
         return chromosomes_protein
 
-    def splitMutationByChromosome(self):
+    def splitMutationByChromosome(self, chromosomes_genome_description=None):
         '''split mutation file based on chromosomes
         '''
         tempfolder = self.tempfolder
         file_mutations = self.file_mutations
         chromosomes_genome = self.chromosomes_genome
-        chromosomes_genome_description = self.chromosomes_genome_description
+        if chromosomes_genome_description is None:
+            chromosomes_genome_description = self.chromosomes_genome_description
 
         df_mutations = pd.read_csv(file_mutations, sep='\t',low_memory=False)
         df_mutations['chr'] = df_mutations['chr'].astype(str)
@@ -317,7 +318,7 @@ class PerGeno(object):
             elif 'chr' + k in chromosomes_genome:
                 print('add "chr" to chromosome ' + k +' in mutation file')
                 tf = os.path.join(tempfolder, 'chr' + k + '.mutation.tsv')
-                v['chr'] = v['chr'].apply(lambda x:'chr' + str(x))
+                v['chr'] = 'chr' + k
             else:
                 print('chromosomes in mutation file is different from the genome. try to solve that. This is usually True if datatype is RefSeq')
                 if k == 'M':
@@ -330,7 +331,7 @@ class PerGeno(object):
                 else:
                     for e in chromosomes_genome_description:
                         e1, e2 = e.split(' ', maxsplit=1)
-                        if f'Homo sapiens chromosome {k},' in e2:
+                        if f'chromosome {k},' in e2:
                             k_new = e1
                             print(f'    mutation chromosome change {k} to {k_new}')
                             break
@@ -476,7 +477,10 @@ class PerGeno(object):
         self.chromosomes_protein = self.splitProteinByChromosomes(dc_protein2chr)
 
         # split mutation. if the chromosome column 'chr' is not the same as chromosomes_genome, try to fix that.
-        self.chromosomes_mutation = self.splitMutationByChromosome()
+        if self.file_mutations:
+            self.chromosomes_mutation = self.splitMutationByChromosome()
+        else:
+            print('file_mutation is not provided, skip splitting mutation file')
         
         # split gtf
         if self.datatype != 'RefSeq':
@@ -567,10 +571,19 @@ class PerGeno(object):
         fout_proteins_changed = open(file_proteins_changed, 'w')
         fout_proteins_all = open(file_proteins_all, 'w')
         for f in files_proteins_changed:
+            proteins_changed_ids = []
             for s in SeqIO.parse(f,'fasta'):
                 fout_proteins_all.write('>{}\n{}\n'.format(s.description, str(s.seq)))
                 if s.description.endswith('\tchanged'):
+                    proteins_changed_ids.append(s.id)
                     fout_proteins_changed.write('>{}\n{}\n'.format(s.description, str(s.seq)))
+            
+            proteins_changed_ids = set(proteins_changed_ids)
+            file_proteins_chromosome_input = f[:-19] + '.proteins.fa'
+            for s in SeqIO.parse(file_proteins_chromosome_input,'fasta'):
+                if s.id not in proteins_changed_ids:
+                    fout_proteins_all.write('>{}\tunchanged\n{}\n'.format(s.description.split('\t',1)[1], str(s.seq)))
+
         
         for f in files_proteins_unchanged:
             for s in SeqIO.parse(f,'fasta'):
