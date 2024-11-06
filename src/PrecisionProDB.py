@@ -4,26 +4,26 @@ import os
 import downloadHuman
 import time
 import sys
+import re
 
 description = '''
 PrecisionProDB, a personal proteogenomic tool which outputs a new reference protein based on the variants data. 
-A VCF or /a tsv file can be used as the variant input. If the
-variant file is in tsv format, at least four columns are required in the
-header: chr, pos, ref, alt. Additional columns will be ignored. Try to Convert the file to proper format if you have a bed file or other types of variant file.
+A VCF or /a tsv file can be used as the variant input. If the variant file is in tsv format, at least four columns are required in the header: chr, pos, ref, alt. Additional columns will be ignored. Try to Convert the file to proper format if you have a bed file or other types of variant file. The pos column is 1-based like in the vcf file.
+Additionally, a string like "chr1-788418-CAG-C" can used as variant input. It has to be combined with the --sqlite for quick check of the mutation effects
 '''
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('-g','--genome', help = 'the reference genome sequence in fasta format. It can be a gzip file', default='')
     parser.add_argument('-f', '--gtf', help='gtf file with CDS and exon annotations. It can be a gzip file', default='')
-    parser.add_argument('-m', '--mutations', help='''a file stores the variants. If the file ends with ".vcf" or ".vcf.gz", treat as vcf input. Otherwise, treat as TSV input ''', required=True)
+    parser.add_argument('-m', '--mutations', help='''a file stores the variants. If the file ends with ".vcf" or ".vcf.gz", treat as vcf input. Otherwise, treat as TSV input. a string like "chr1-788418-CAG-C" can used as variant input, too. ''', default = '', required=False)
     parser.add_argument('-p','--protein', help = 'protein sequences in fasta format. It can be a gzip file. Only proteins in this file will be checked', default='')
     parser.add_argument('-t', '--threads', help='number of threads/CPUs to run the program. default, use all CPUs available', type=int, default=os.cpu_count())
     parser.add_argument('-o', '--out', help='''output prefix, folder path could be included. Three or five files will be saved depending on the variant file format. Outputs include the annotation for mutated transcripts, the mutated or all protein sequences, two variant files from vcf. {out}.pergeno.aa_mutations.csv, {out}.pergeno.protein_all.fa, {out}.protein_changed.fa, {out}.vcf2mutation_1/2.tsv. default "perGeno" ''', default="perGeno")
     parser.add_argument('-a', '--datatype', help='''input datatype, could be GENCODE_GTF, GENCODE_GFF3, RefSeq, Ensembl_GTF or gtf. default "gtf". Ensembl_GFF3 is not supported. ''', default='gtf', type=str, choices=['GENCODE_GTF', 'GENCODE_GFF3','RefSeq','Ensembl_GTF','gtf'])
     parser.add_argument('-k','--protein_keyword', help='''field name in attribute column of gtf file to determine ids for proteins. default "auto", determine the protein_keyword based on datatype. "transcript_id" for GENCODE_GTF, "protein_id" for "RefSeq" and "Parent" for gtf and GENCODE_GFF3 ''', default='auto')
     parser.add_argument('-F', '--no_filter', help='default only keep variant with value "PASS" FILTER column of vcf file. if set, do not filter', action='store_true')
-    parser.add_argument('-s', '--sample', help='sample name in the vcf to extract the variant information. default: None, extract the first sample', default=None)
+    parser.add_argument('-s', '--sample', help='sample name in the vcf to extract the variant information. default: None, extract the first sample. ', default=None)
     parser.add_argument('-A','--all_chromosomes', help='default keep variant in chromosomes and ignore those in short fragments of the genome. if set, use all chromosomes including fragments when parsing the vcf file', action='store_true')
     parser.add_argument('-D','--download', help='''download could be 'GENCODE','RefSeq','Ensembl','Uniprot'. If set, PrecisonProDB will try to download genome, gtf and protein files from the Internet. Download will be skipped if "--genome, --gtf, --protein, (--uniprot)" were all set. Settings from "--genome, --gtf, --protein, (--uniprot), --datatype" will not be used if the files were downloaded by PrecisonProDB. default "".''', default='', type=str, choices=['GENCODE','RefSeq','Ensembl','Uniprot',''])
     parser.add_argument('-U','--uniprot', help='''uniprot protein sequences. If more than one file, use "," to join the files. default "". For example, "UP000005640_9606.fasta.gz", or "UP000005640_9606.fasta.gz,UP000005640_9606_additional.fasta" ''', default='', type=str)
@@ -94,6 +94,9 @@ if __name__ == '__main__':
 
 
     if file_sqlite == '':
+        if file_mutations == '':
+            print('file_sqlite not provided. no input mutation file is provided. exit...')
+            sys.exit()
         if file_mutations.lower().endswith('.vcf') or file_mutations.lower().endswith('.vcf.gz'):
             print('variant file is a vcf file')
             runPerGenoVCF(
@@ -130,20 +133,26 @@ if __name__ == '__main__':
     else:
         # use Sqlite
         import PrecisionProDB_Sqlite
+        print('using sqlite database to speed up')
         PrecisionProDB_Sqlite.main(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite)
 
-    # deal with uniprot
-    if download == 'UNIPROT':
-        print('try to extract Uniprot proteins from Ensembl models')
-        import extractMutatedUniprot
-        extractMutatedUniprot.extractMutatedUniprot(files_uniprot=files_uniprot, files_ref=file_protein, files_alt=outprefix + '.pergeno.protein_all.fa', outprefix=outprefix, length_min = uniprot_min_len)
-
-    # generate PEFF output file
-    if f.PEFF:
-        import generatePEFFoutput
-        generatePEFFoutput.generatePEFFoutput(file_protein = file_protein, file_mutation = outprefix + '.pergeno.aa_mutations.csv', file_out = outprefix + '.pergeno.protein_PEFF.fa', TEST=False)
+    pattern = re.compile(r'(chr)?(\d+)-(\d+)-([A-Za-z]+)-([A-Za-z]+)')
+    match = pattern.match(file_mutations)
+    if match and (not os.path.exists(file_mutations)):
+        pass # file_muations is a string like "chr1-788418-CAG-C". do not need to run the following scripts
+    else:
+        # deal with uniprot
         if download == 'UNIPROT':
-            generatePEFFoutput.generateUniprotPEFFout(file_PEFF = outprefix + '.pergeno.protein_PEFF.fa', files_uniprot_ref = files_uniprot, file_uniprot_changed = outprefix + '.uniprot_changed.tsv', file_uniprot_out = outprefix + '.uniprot_PEFF.fa')
+            print('try to extract Uniprot proteins from Ensembl models')
+            import extractMutatedUniprot
+            extractMutatedUniprot.extractMutatedUniprot(files_uniprot=files_uniprot, files_ref=file_protein, files_alt=outprefix + '.pergeno.protein_all.fa', outprefix=outprefix, length_min = uniprot_min_len)
+
+        # generate PEFF output file
+        if f.PEFF:
+            import generatePEFFoutput
+            generatePEFFoutput.generatePEFFoutput(file_protein = file_protein, file_mutation = outprefix + '.pergeno.aa_mutations.csv', file_out = outprefix + '.pergeno.protein_PEFF.fa', TEST=False)
+            if download == 'UNIPROT':
+                generatePEFFoutput.generateUniprotPEFFout(file_PEFF = outprefix + '.pergeno.protein_PEFF.fa', files_uniprot_ref = files_uniprot, file_uniprot_changed = outprefix + '.uniprot_changed.tsv', file_uniprot_out = outprefix + '.uniprot_PEFF.fa')
 
 
     print('PrecisionProDB finished! Total seconds:', time.time() - time0)
