@@ -45,22 +45,67 @@ def getRefSeqLatest():
     folders = ftp.nlst(folder)
 
     # get the only folder in folders
+    ls_folders = []
     for file in folders:
         try:
             ftp.size(file)
         except:
-            break
+            ls_folders.append(file)
     
-    folder_release = file
-    version = os.path.basename(folder_release)
-    print('RefSeq, the latest release is', version)
+    ls_url_genome = []
+    ls_url_GTF = []
+    ls_url_protein = []
 
-    files_latest = ftp.nlst(folder_release)
+    for folder_release in ls_folders:
+        version = os.path.basename(folder_release)
+        print('RefSeq, the latest release is', version)
 
-    url_genome = 'ftp://' + ftp_url + [e for e in files_latest if re.findall(f'/{version}_genomic.fna.gz',e)][0]
-    url_GTF = 'ftp://' + ftp_url + [e for e in files_latest if re.findall(f'/{version}_genomic.gtf.gz',e)][0]
-    url_protein = 'ftp://' + ftp_url + [e for e in files_latest if re.findall(f'/{version}_protein.faa.gz',e)][0]
+        files_latest = ftp.nlst(folder_release)
 
+        ls_url_genome += ['ftp://' + ftp_url + e for e in files_latest if re.findall(f'/.*_genomic.fna.gz',e)]
+        ls_url_GTF += ['ftp://' + ftp_url + e for e in files_latest if re.findall(f'/.*_genomic.gtf.gz',e)]
+        ls_url_protein += ['ftp://' + ftp_url + e for e in files_latest if re.findall(f'/.*_protein.faa.gz',e)]
+
+    url_genome = [i for i in ls_url_genome if 'T2T-CHM13' not in i and 'cds_' not in i and 'rna_' not in i][0]
+    url_GTF = [i for i in ls_url_GTF if 'T2T-CHM13' not in i][0]
+    url_protein = [i for i in ls_url_protein if 'T2T-CHM13' not in i][0]
+    return url_genome, url_GTF, url_protein
+
+
+def getRefSeqLatestCHM13():
+    '''return urls of files from the latest release version of RefSeq
+    '''
+    ftp_url = 'ftp.ncbi.nlm.nih.gov'
+    folder = '/genomes/refseq/vertebrate_mammalian/Homo_sapiens/annotation_releases/current'
+    ftp = FTP(ftp_url)
+    ftp.login()
+    folders = ftp.nlst(folder)
+
+    # get the only folder in folders
+    ls_folders = []
+    for file in folders:
+        try:
+            ftp.size(file)
+        except:
+            ls_folders.append(file)
+    
+    ls_url_genome = []
+    ls_url_GTF = []
+    ls_url_protein = []
+
+    for folder_release in ls_folders:
+        version = os.path.basename(folder_release)
+        print('RefSeq, the latest release is', version)
+
+        files_latest = ftp.nlst(folder_release)
+
+        ls_url_genome += ['ftp://' + ftp_url + e for e in files_latest if re.findall(f'/.*_genomic.fna.gz',e)]
+        ls_url_GTF += ['ftp://' + ftp_url + e for e in files_latest if re.findall(f'/.*_genomic.gtf.gz',e)]
+        ls_url_protein += ['ftp://' + ftp_url + e for e in files_latest if re.findall(f'/.*_protein.faa.gz',e)]
+
+    url_genome = [i for i in ls_url_genome if 'T2T-CHM13' in i and 'cds_' not in i and 'rna_' not in i][0]
+    url_GTF = [i for i in ls_url_GTF if 'T2T-CHM13' in i][0]
+    url_protein = [i for i in ls_url_protein if 'T2T-CHM13' in i][0]
     return url_genome, url_GTF, url_protein
 
 def getEnsemblLatest():
@@ -187,13 +232,14 @@ def download(datatype, workfolder='.'):
 
 description = '''
 download the latest human gene models from RefSeq, GENCODE, Ensembl or UniProt to run PrecisionProDB.
-If datatype is "Uniprot", Ensembl and UniProt human sequences (UP000005640_9606, UP000005640_9606_additional) will be downloaded
+If datatype is "Uniprot", Ensembl and UniProt human sequences (UP000005640_9606, UP000005640_9606_additional) will be downloaded.
+If datatype is 'CHM13', the RefSeq CHM13 file will be downloaded
 '''
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('-d','--datatype', help = 'RefSeq, GENCODE, Ensembl or Uniprot to download.', required=True)
+    parser.add_argument('-d','--datatype', help = 'RefSeq, CHM13, GENCODE, Ensembl or Uniprot to download.', required=True)
     parser.add_argument('-o', '--out', help='output folder for the downloaded files. default: ".",current folder', default='.')
     f = parser.parse_args()
     
