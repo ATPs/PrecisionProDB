@@ -444,6 +444,14 @@ def create_sqlite(file_sqlite, file_genome, file_gtf, file_protein, outprefix, d
 
     print('building sqlite done')
     con.close()
+    # clear temp folder
+    tempfolder = pergeno.tempfolder
+    if keep_all:
+        print('keep all intermediate files')
+    else:
+        print('remove temp folder')
+        shutil.rmtree(tempfolder)
+    print('finished!')
 
 def get_connection(file_sqlite):
     '''Get a connection to the SQLite database.'''
@@ -455,20 +463,38 @@ def get_connection(file_sqlite):
         print(f'Error connecting to SQLite database: {e}')
         sys.exit(1)
 
+
+def get_proteins_from_sqlite(file_sqlite, file_output = None):
+    '''if file_output is provided, write fasta file to it. if not provided, return df_protein_description
+    '''
+    conn = get_connection(file_sqlite)
+    df_protein_description = pd.read_sql("SELECT * FROM protein_description", conn)
+    if file_output is None:
+        return df_protein_description
+
+    fout = open(file_output, 'w')
+    for _, s in df_protein_description.iterrows():
+        protein_id, protein_description, protein_id_fasta, AA_seq = s['protein_id'], s['protein_description'], s['protein_id_fasta'], s['AA_seq']
+        fout.write('>{}\n{}\n'.format(protein_description, str(AA_seq)))
+    fout.close()
+    
+    conn.close()
+
+
 description = '''create a sqlite file for PrecisionProDB.'''
 
 if __name__ == '__main__':
     
     import argparse
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('-q', '--sqlite', help='SQLite file with CDS and exon annotations', required=True)
+    parser.add_argument('-S', '--sqlite', help='SQLite file with CDS and exon annotations', required=True)
     parser.add_argument('-g', '--genome', help='Path to the genome fasta file', required=True)
     parser.add_argument('-p', '--protein', help='Path to the protein sequences file', required=True)
     parser.add_argument('-f', '--gtf', help='Path to the GTF file with gene annotations', required=True)
-    parser.add_argument('-o', '--out', help='Output prefix. Two files will be output: one with annotation for mutated transcripts and one with the protein sequences. {out}.aa_mutations.csv, {out}.mutated_protein.fa', default=None)
+    parser.add_argument('-o', '--out', help='''output prefix. used to store temp files. default "perGeno" ''', default="perGeno")
     parser.add_argument('-a', '--datatype', help='''input datatype, could be GENCODE_GTF, GENCODE_GFF3, RefSeq, Ensembl_GTF or gtf. default "gtf". Ensembl_GFF3 is not supported. ''', default='gtf', type=str, choices=['GENCODE_GTF', 'GENCODE_GFF3','RefSeq','Ensembl_GTF','gtf'])
     parser.add_argument('-k', '--protein_keyword', help='Keyword for filtering protein sequences', default='auto')
-    parser.add_argument('--keep_all', help='Keep all data. Default is False.', type=bool, default=False)
+    parser.add_argument('--keep_all', help='If set, do not delete files generated during the run', action='store_true')
     
     if TEST:
         args = parser.parse_args(['-q', file_sqlite, '-g', file_genome, '-p', file_protein, '-f', file_gtf, '-o', outprefix, '-a', 'GENCODE_GTF', '-k', protein_keyword, '--keep_all', str(keep_all)])
