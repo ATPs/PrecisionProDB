@@ -201,6 +201,8 @@ def download(datatype, workfolder='.'):
         url_genome, url_GTF, url_protein = getEnsemblLatest()
     elif datatype == 'UNIPROT':
         url_genome, url_GTF, url_protein = getEnsemblLatest()
+    elif datatype == 'CHM13':
+        url_genome, url_GTF, url_protein = getRefSeqLatestCHM13()
     else:
         print('other datatype is not supported now.')
         exit(0)
