@@ -85,8 +85,14 @@ class PerChrom_sqlite(object):
         
         # dataframe to store the mutation information
         global df_mutations
-        if self.file_mutations:
+        
+        if isinstance(self.file_mutations, pd.DataFrame):
+            df_mutations = self.file_mutations
+            self.df_mutations = df_mutations
+            # print(df_mutations)
+        elif self.file_mutations:
             df_mutations = perChrom.parse_mutation(file_mutations=self.file_mutations, chromosome=self.chromosome)
+            # print(df_mutations.head())
             self.df_mutations = df_mutations
         else:
             print(self.chromosome, 'No mutation file provided, will not do mutation analysis')
