@@ -43,9 +43,9 @@ def parse_proteins(file_proteins):
 def parse_mutation(file_mutations, chromosome=None):
     '''
     Parse mutation file.
-    
-    This function parses a mutation file, which can be either a string representing a single mutation or a file containing multiple mutations. 
-    If the input is a string like "1-55051215-G-GA" or "chr1-55051215-G-GA" , it uses a regular expression to extract the chromosome, position, reference allele, and alternate allele. If the input is a file, it reads the file into a DataFrame and processes it accordingly. The function also handles the calculation of the end position for each mutation and optionally assigns a specific chromosome if provided.
+
+    This function parses a mutation file, which can be either either a comma-separated string representing multiple mutations or a file containing multiple mutations. 
+    If the input is a string like "1-55051215-G-GA" or "chr1-55051215-G-GA" or "chr1-55051215-G-GA,1-6253878-C-T", it uses a regular expression to extract the chromosome, position, reference allele, and alternate allele. If the input is a file, it reads the file into a DataFrame and processes it accordingly. The function also handles the calculation of the end position for each mutation and optionally assigns a specific chromosome if provided.
     
     Parameters:
     file_mutations (str): The path to the mutation file or a string representing a single mutation.
@@ -57,17 +57,22 @@ def parse_mutation(file_mutations, chromosome=None):
     # Use regex to parse the string
     pattern = re.compile(r'(chr)?(\d+)-(\d+)-([A-Za-z]+)-([A-Za-z]+)')
     match = pattern.match(file_mutations)
+    mutation_data = []
     if match and (not os.path.exists(file_mutations)):
-        print('file_mutations is a single mutation', file_mutations)
-        chr_name = match.group(2)
-        pos = int(match.group(3))
-        ref = match.group(4)
-        alt = match.group(5)
+        print('file_mutations is a mutation string', file_mutations)
+        l = file_mutations.split(',')
+        for i in l:
+            match = pattern.match(i)
+            chr_name = match.group(2)
+            pos = int(match.group(3))
+            ref = match.group(4)
+            alt = match.group(5)
+            mutation_data.append([chr_name, pos, ref, alt])
         df_mutations = pd.DataFrame({
-            'chr': [chr_name],
-            'pos': [pos],
-            'ref': [ref],
-            'alt': [alt]
+            'chr': [i[0] for i in mutation_data],
+            'pos': [i[1] for i in mutation_data],
+            'ref': [i[2] for i in mutation_data],
+            'alt': [i[3] for i in mutation_data]
         })
         df_mutations['pos_end'] = df_mutations['pos'] + df_mutations['ref'].str.len() - 1
         if chromosome:
