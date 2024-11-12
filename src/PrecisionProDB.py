@@ -5,6 +5,7 @@ import downloadHuman
 import time
 import sys
 import re
+import buildSqlite
 
 description = '''
 PrecisionProDB, a personal proteogenomic tool which outputs a new reference protein based on the variants data. 
@@ -16,7 +17,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('-g','--genome', help = 'the reference genome sequence in fasta format. It can be a gzip file', default='')
     parser.add_argument('-f', '--gtf', help='gtf file with CDS and exon annotations. It can be a gzip file', default='')
-    parser.add_argument('-m', '--mutations', help='''a file stores the variants. If the file ends with ".vcf" or ".vcf.gz", treat as vcf input. Otherwise, treat as TSV input. a string like "chr1-788418-CAG-C" can used as variant input, too. ''', default = '', required=False)
+    parser.add_argument('-m', '--mutations', help='''a file stores the variants. If the file ends with ".vcf" or ".vcf.gz", treat as vcf input. Otherwise, treat as TSV input. a string like "chr1-788418-CAG-C" or "chr1-942451-T-C,1-6253878-C-T,1-2194700-C-G" can used as variant input, too. ''', default = '', required=False)
     parser.add_argument('-p','--protein', help = 'protein sequences in fasta format. It can be a gzip file. Only proteins in this file will be checked', default='')
     parser.add_argument('-t', '--threads', help='number of threads/CPUs to run the program. default, use all CPUs available', type=int, default=os.cpu_count())
     parser.add_argument('-o', '--out', help='''output prefix, folder path could be included. Three or five files will be saved depending on the variant file format. Outputs include the annotation for mutated transcripts, the mutated or all protein sequences, two variant files from vcf. {out}.pergeno.aa_mutations.csv, {out}.pergeno.protein_all.fa, {out}.protein_changed.fa, {out}.vcf2mutation_1/2.tsv. default "perGeno" ''', default="perGeno")
@@ -25,11 +26,12 @@ if __name__ == '__main__':
     parser.add_argument('-F', '--no_filter', help='default only keep variant with value "PASS" FILTER column of vcf file. if set, do not filter', action='store_true')
     parser.add_argument('-s', '--sample', help='sample name in the vcf to extract the variant information. default: None, extract the first sample. ', default=None)
     parser.add_argument('-A','--all_chromosomes', help='default keep variant in chromosomes and ignore those in short fragments of the genome. if set, use all chromosomes including fragments when parsing the vcf file', action='store_true')
-    parser.add_argument('-D','--download', help='''download could be 'GENCODE','RefSeq','Ensembl','Uniprot'. If set, PrecisonProDB will try to download genome, gtf and protein files from the Internet. Download will be skipped if "--genome, --gtf, --protein, (--uniprot)" were all set. Settings from "--genome, --gtf, --protein, (--uniprot), --datatype" will not be used if the files were downloaded by PrecisonProDB. default "".''', default='', type=str, choices=['GENCODE','RefSeq','Ensembl','Uniprot',''])
+    parser.add_argument('-D','--download', help='''download could be 'GENCODE','RefSeq','Ensembl','Uniprot'. If set, PrecisonProDB will try to download genome, gtf and protein files from the Internet. Download will be skipped if "--genome, --gtf, --protein, (--uniprot)" were all set. Settings from "--genome, --gtf, --protein, (--uniprot), --datatype" will not be used if the files were downloaded by PrecisonProDB. default "". Note, if --sqlite is set, will not download any files ''', default='', type=str, choices=['GENCODE','RefSeq','Ensembl','Uniprot',''])
     parser.add_argument('-U','--uniprot', help='''uniprot protein sequences. If more than one file, use "," to join the files. default "". For example, "UP000005640_9606.fasta.gz", or "UP000005640_9606.fasta.gz,UP000005640_9606_additional.fasta" ''', default='', type=str)
     parser.add_argument('--uniprot_min_len', help='''minimum length required when matching uniprot sequences to proteins annotated in the genome. default 20 ''', default=20, type=int)
     parser.add_argument('--PEFF', help='If set, PEFF format file(s) will be generated. Default: do not generate PEFF file(s).', action='store_true')
     parser.add_argument('--keep_all', help='If set, do not delete files generated during the run', action='store_true')
+
     parser.add_argument('-S','--sqlite', help='''A path of sqlite file for re-use of annotation info. default '', do not use sqlite. The program will create a sqlite file if the file does not exist. If the file already exists, the program will use data stored in the file. It will cause error if the content in the sqlite file is not as expected. ''', default='', type=str)
 
     
@@ -63,10 +65,10 @@ if __name__ == '__main__':
         if not os.path.exists(workfolder):
             os.makedirs(workfolder)
 
-    # download required files if download is set
-    if download != '':
+    # download required files if download is set. will not download if file_sqlite is set. 
+    download = download.upper()
+    if download != '' and file_sqlite == '':
         print('-D --download is set to be', download, '\n')
-        download = download.upper()
         if download != 'UNIPROT':
             if file_genome != '' and file_gtf != '' and file_protein != '':
                 print('download already finished for', download)
@@ -92,7 +94,13 @@ if __name__ == '__main__':
                 files_uniprot = ','.join([file_uniprot, file_uniprot_additional])
                 datatype = 'Ensembl_GTF'
 
-
+    pattern = re.compile(r'(chr)?(\d+)-(\d+)-([A-Za-z]+)-([A-Za-z]+)')
+    match = pattern.match(file_mutations)
+    if match and (not os.path.exists(file_mutations)):
+        if file_sqlite == '':
+            print(f'file_mutations is a string {file_mutations} while file_sqlite is not provided. exit...')
+            sys.exit()
+            
     if file_sqlite == '':
         if file_mutations == '':
             print('file_sqlite not provided. no input mutation file is provided. exit...')
@@ -139,10 +147,16 @@ if __name__ == '__main__':
     pattern = re.compile(r'(chr)?(\d+)-(\d+)-([A-Za-z]+)-([A-Za-z]+)')
     match = pattern.match(file_mutations)
     if match and (not os.path.exists(file_mutations)):
-        pass # file_muations is a string like "chr1-788418-CAG-C". do not need to run the following scripts
+        if download == 'UNIPROT':
+            print(f'file_mutations is a string {file_mutations}. running with UniProt is not supported. will not extract UniProt sequences or generate PEFF file!')
     else:
         # deal with uniprot
         if download == 'UNIPROT':
+            if file_sqlite != '' and file_protein == '':
+                print('extract all protein sequences from sqlite file')
+                file_protein = outprefix + '.file_proteins_input_from_sqlite.fasta'
+                buildSqlite.get_proteins_from_sqlite(file_sqlite, file_output = file_protein)
+
             print('try to extract Uniprot proteins from Ensembl models')
             import extractMutatedUniprot
             extractMutatedUniprot.extractMutatedUniprot(files_uniprot=files_uniprot, files_ref=file_protein, files_alt=outprefix + '.pergeno.protein_all.fa', outprefix=outprefix, length_min = uniprot_min_len)
@@ -150,7 +164,8 @@ if __name__ == '__main__':
         # generate PEFF output file
         if f.PEFF:
             import generatePEFFoutput
-            generatePEFFoutput.generatePEFFoutput(file_protein = file_protein, file_mutation = outprefix + '.pergeno.aa_mutations.csv', file_out = outprefix + '.pergeno.protein_PEFF.fa', TEST=False)
+            generatePEFFoutput.generatePEFFoutput(file_protein = file_protein, file_mutation = outprefix + '.pergeno.aa_mutations.csv', file_out = outprefix + '.pergeno.protein_PEFF.fa', TEST=False, file_sqlite = file_sqlite)
+
             if download == 'UNIPROT':
                 generatePEFFoutput.generateUniprotPEFFout(file_PEFF = outprefix + '.pergeno.protein_PEFF.fa', files_uniprot_ref = files_uniprot, file_uniprot_changed = outprefix + '.uniprot_changed.tsv', file_uniprot_out = outprefix + '.uniprot_PEFF.fa')
 
