@@ -8,6 +8,34 @@ from perChrom import PerChrom
 import shutil
 import re
 
+def get_k_new(k, chromosomes_genome, chromosomes_genome_description):
+    '''k is chromosome name. return chromosome name based on chromosomes_genome, chromosomes_genome_description
+    deal with RefSeq IDs
+    '''
+    if k.startswith('chr'):
+        k = k[3:]
+    # Step 1: Check if k or 'chr' + k is in chromosomes_genome
+    if k in chromosomes_genome:
+        return k
+    elif 'chr' + k in chromosomes_genome:
+        return 'chr' + k
+
+    # Step 2: Special handling for mitochondrial chromosome 'M'
+    if k == 'M':
+        for e in chromosomes_genome_description:
+            e1, e2 = e.split(' ', maxsplit=1)
+            if 'Homo sapiens mitochondrion, complete genome' in e2:
+                return e1  # Return corresponding genome name
+
+    # Step 3: General search for other chromosomes in chromosomes_genome_description
+    for e in chromosomes_genome_description:
+        e1, e2 = e.split(' ', maxsplit=1)
+        if f'chromosome {k},' in e2:
+            return e1  # Return corresponding genome name
+
+    # Step 4: Fallback - if no match, return k as-is
+    return k
+
 
 def openFile(filename):
     '''open text or gzipped text file
@@ -132,6 +160,8 @@ class PerGeno(object):
             print('input data is provided as from Ensembl_GTF. Note: for some Ensembl models, the protein sequences are not translated based on GTF annotation. Those sequences will be ignored.')
             return datatype
         
+        if not os.path.exists(file_gtf):
+            return datatype
         print('datatype is not provided. Try to infer datatype. Note: Ensembl datatype cannot be inferred.')
 
         f = openFile(file_gtf)
@@ -295,12 +325,13 @@ class PerGeno(object):
         tf_proteins_not_in_genome.close()
         return chromosomes_protein
 
-    def splitMutationByChromosome(self, chromosomes_genome_description=None):
+    def splitMutationByChromosome(self, chromosomes_genome_description=None, chromosomes_genome=None):
         '''split mutation file based on chromosomes
         '''
         tempfolder = self.tempfolder
         file_mutations = self.file_mutations
-        chromosomes_genome = self.chromosomes_genome
+        if chromosomes_genome is None:
+            chromosomes_genome = self.chromosomes_genome
         if chromosomes_genome_description is None:
             chromosomes_genome_description = self.chromosomes_genome_description
 
@@ -310,15 +341,17 @@ class PerGeno(object):
 
         for k,v in df_mutations.groupby('chr'):
             v = v.copy()
-            chromosomes_mutation.append(k)
             if k.startswith('chr'):
                 k = k[3:]
             if k in chromosomes_genome:
                 tf = os.path.join(tempfolder, k + '.mutation.tsv')
+                v['chr'] = k
+                chromosomes_mutation.append(k)
             elif 'chr' + k in chromosomes_genome:
                 print('add "chr" to chromosome ' + k +' in mutation file')
                 tf = os.path.join(tempfolder, 'chr' + k + '.mutation.tsv')
                 v['chr'] = 'chr' + k
+                chromosomes_mutation.append('chr' + k)
             else:
                 print('chromosomes in mutation file is different from the genome. try to solve that. This is usually True if datatype is RefSeq')
                 if k == 'M':
@@ -327,6 +360,8 @@ class PerGeno(object):
                         if 'Homo sapiens mitochondrion, complete genome' in e2:
                             k_new = e1
                             print(f'    mutation chromosome change {k} to {k_new}')
+                            v['chr'] = k_new
+                            chromosomes_mutation.append(k_new)
                             break
                 else:
                     for e in chromosomes_genome_description:
@@ -334,10 +369,14 @@ class PerGeno(object):
                         if f'chromosome {k},' in e2:
                             k_new = e1
                             print(f'    mutation chromosome change {k} to {k_new}')
+                            v['chr'] = k_new
+                            chromosomes_mutation.append(k_new)
                             break
                     else:
                         print('chromosomes in mutation file', k, 'cannot find corresponding chromosome in genome file. please check')
                         k_new = k
+                        v['chr'] = k_new
+                        chromosomes_mutation.append(k_new)
                 tf = os.path.join(tempfolder, k_new + '.mutation.tsv')
 
             v.to_csv(tf, sep='\t',index=None)
