@@ -10,8 +10,9 @@ import re
 import sys
 import perChromSqlite
 import buildSqlite
-from PrecisionProDB_core import PerGeno
+from PrecisionProDB_core import PerGeno, get_k_new
 import re
+import sqlite3
 
 # code below for testing the the program
 TEST = False
@@ -66,7 +67,7 @@ def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_ke
         file_genome = '', 
         file_gtf = file_gtf, 
         file_mutations = file_mutations, 
-        file_protein=file_protein, 
+        file_protein='', 
         threads=threads, 
         outprefix=outprefix, 
         datatype=datatype, 
@@ -76,7 +77,7 @@ def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_ke
     
     tempfolder = pergeno.tempfolder
     pergeno.chromosomes_genome = chromosomes_genome
-    chromosomes_mutation = pergeno.splitMutationByChromosome(chromosomes_genome_description=chromosomes_genome_description)
+    chromosomes_mutation = pergeno.splitMutationByChromosome(chromosomes_genome_description=chromosomes_genome_description, chromosomes_genome=chromosomes_genome)
 
     # run runSinglePerChromSqlite
     chromosomes_mutated = [runSinglePerChromSqlite(file_sqlite, file_mutations, tempfolder, threads, chromosome, datatype) for chromosome in chromosomes_mutation]
@@ -215,9 +216,16 @@ def runPerChomSqlite_vcf(file_mutations, file_sqlite, threads, outprefix, dataty
     fout_protein_all_2 = outprefix_2 + '.pergeno.protein_all.fa'
     fout_protein_all = outprefix + '.pergeno.protein_all.fa'
     f = open(fout_protein_all,'w')
-    for s in SeqIO.parse(openFile(file_protein),'fasta'):
-        if s.id not in protein_ids_changedBothStrands:
-            f.write('>{}\n{}\n'.format(s.description + '\tunchanged', str(s.seq)))
+
+    conn = buildSqlite.get_connection(file_sqlite)
+    df_protein_description = pd.read_sql("SELECT * FROM protein_description", conn)
+    df_protein_description = df_protein_description[~ df_protein_description['protein_id_fasta'].isin(protein_ids_changedBothStrands)]
+    for _, s in df_protein_description.iterrows():
+        protein_id, protein_description, protein_id_fasta, AA_seq = s['protein_id'], s['protein_description'], s['protein_id_fasta'], s['AA_seq']
+        f.write('>{}\tunchanged\n{}\n'.format(protein_description, str(AA_seq)))
+    
+    conn.close()
+    
     f.write(open(fout_protein_changed).read())
     f.close()
 
@@ -234,13 +242,69 @@ def runPerChomSqlite_vcf(file_mutations, file_sqlite, threads, outprefix, dataty
         os.remove(fout_protein_changed_2)
         os.remove(fout_protein_all_1)
         os.remove(fout_protein_all_2)
+        os.removedirs(outprefix + '_temp')
     print('perGeno_vcf finished!')
 
+
+
+def check_sqlite_file(file_path):
+    """
+    Checks if an SQLite file meets certain conditions.
+
+    This function verifies the following conditions for the provided SQLite file:
+    1. The file must exist.
+    2. The file size must be greater than or equal to 100 bytes.
+    3. The database must contain the tables 'CDSloc', 'protein_description', and 'chromosomes_using'.
+    4. The database must contain at least one table name that starts with 'genomicLocs'.
+
+    Args:
+        file_path (str): The path to the SQLite file.
+
+    Returns:
+        bool: True if all conditions are met, otherwise False.
+    """
+    # Check if the file exists
+    if not os.path.exists(file_path):
+        return False
+    
+    # Check if the file size is greater than or equal to 100 bytes
+    if os.path.getsize(file_path) < 100:
+        return False
+    
+    try:
+        # Connect to the SQLite database
+        conn = sqlite3.connect(file_path)
+        cursor = conn.cursor()
+
+        # Get all table names from the database
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        table_names = [row[0] for row in cursor.fetchall()]
+        
+        # Check if required tables exist in the database
+        required_tables = {"CDSloc", "protein_description", "chromosomes_using"}
+        if not required_tables.issubset(table_names):
+            return False
+
+        # Check if at least one table name starts with "genomicLocs"
+        if not any(table_name.startswith("genomicLocs") for table_name in table_names):
+            return False
+
+        return True
+    
+    except sqlite3.Error:
+        # If there's an error with connecting to or querying the SQLite database, return False
+        return False
+    
+    finally:
+        # Close the database connection if it was opened
+        if 'conn' in locals():
+            conn.close()
+            
 def main(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite):
 
     if os.path.exists(file_sqlite):
-        if os.path.getsize(file_sqlite) < 100:
-            print(f'sqlite file "{file_sqlite}" is empty? delete the file before running the program')
+        if not check_sqlite_file(file_sqlite):
+            print(f'sqlite file "{file_sqlite}" is not good? delete the file before running the program!!!')
             sys.exit()
         else:
             print('running in sqlite mode')
@@ -266,24 +330,39 @@ def main(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix
     match = pattern.match(file_mutations)
     if match and (not os.path.exists(file_mutations)):
         df_mutations = perChrom.parse_mutation(file_mutations=file_mutations)
-        chr_temp = df_mutations.iloc[0]['chr']
-        if chr_temp in chromosomes_genome:
-            chromosome = chr_temp
-        elif 'chr' + chr_temp in chromosomes_genome:
-            chromosome = 'chr' + chr_temp
-        elif chr_temp.replace('chr','') in chromosomes_genome:
-            chromosome = chr_temp.replace('chr','')
+        ls_results = []
+        for chr_temp, file_mutations_single_chromosome in df_mutations.groupby('chr'):
+            # chr_temp = df_mutations.iloc[0]['chr']
+            chr_temp = get_k_new(chr_temp, chromosomes_genome, chromosomes_genome_description)
+            if chr_temp in chromosomes_genome:
+                chromosome = chr_temp
+                file_mutations_single_chromosome['chr'] = chromosome
+            else:
+                print('chromosome not found in the genome')
+                continue
+            perchrom_sqlite = perChromSqlite.PerChrom_sqlite(file_sqlite = file_sqlite,
+                            file_mutations = file_mutations_single_chromosome,
+                            threads = threads,
+                            outprefix = outprefix,
+                            datatype = datatype,
+                            chromosome = chromosome)
+            print('run perChrom for chromosome', chromosome)
+            ls_results.append(perchrom_sqlite.run_perChrom(save_results=False))
+        df_transcript3 = pd.concat(ls_results, ignore_index=True)
+        perChrom.save_mutation_and_proteins(df_transcript3, outprefix)
+        # clear temp folder
+        if keep_all:
+            print('keep all intermediate files')
         else:
-            print('chromosome not found in the genome')
-            sys.exit()
-        perchrom_sqlite = perChromSqlite.PerChrom_sqlite(file_sqlite = file_sqlite,
-                        file_mutations = file_mutations,
-                        threads = threads,
-                        outprefix = outprefix,
-                        datatype = datatype,
-                        chromosome = chromosome)
-        print('run perChrom for chromosome', chromosome)
-        perchrom_sqlite.run_perChrom()
+            print('remove temp folder')
+            shutil.rmtree(tempfolder)
+        
+        # rename files
+        if os.path.exists(outprefix + '.aa_mutations.csv'):
+            os.rename(outprefix + '.aa_mutations.csv',outprefix + '.pergeno.aa_mutations.csv')
+        if os.path.exists(outprefix + '.mutated_protein.fa'):
+            os.rename(outprefix + '.mutated_protein.fa',outprefix + '.pergeno.mutated_protein.fa')
+        print('finished!')
         
     elif file_mutations.lower().endswith('.vcf') or file_mutations.lower().endswith('.vcf.gz'):
         print('variant file is a vcf file')
