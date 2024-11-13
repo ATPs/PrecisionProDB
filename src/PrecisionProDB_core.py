@@ -343,7 +343,7 @@ class PerGeno(object):
             k_new = get_k_new(k, chromosomes_genome, chromosomes_genome_description)
             v = v.copy()
             v['chr'] = k_new
-            print(chromosomes_genome, k, k_new)
+            # print(chromosomes_genome, k, k_new)
             tf = os.path.join(tempfolder, k_new + '.mutation.tsv')
             if k_new in chromosomes_genome:
                 chromosomes_mutation.append(k_new)
