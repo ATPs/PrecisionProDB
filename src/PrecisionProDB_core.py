@@ -24,7 +24,7 @@ def get_k_new(k, chromosomes_genome, chromosomes_genome_description):
     if k == 'M':
         for e in chromosomes_genome_description:
             e1, e2 = e.split(' ', maxsplit=1)
-            if 'Homo sapiens mitochondrion, complete genome' in e2:
+            if 'mitochondrion' in e2.lower():
                 return e1  # Return corresponding genome name
 
     # Step 3: General search for other chromosomes in chromosomes_genome_description
@@ -338,47 +338,15 @@ class PerGeno(object):
         df_mutations = pd.read_csv(file_mutations, sep='\t',low_memory=False)
         df_mutations['chr'] = df_mutations['chr'].astype(str)
         chromosomes_mutation = []
-
+        
         for k,v in df_mutations.groupby('chr'):
+            k_new = get_k_new(k, chromosomes_genome, chromosomes_genome_description)
             v = v.copy()
-            if k.startswith('chr'):
-                k = k[3:]
-            if k in chromosomes_genome:
-                tf = os.path.join(tempfolder, k + '.mutation.tsv')
-                v['chr'] = k
-                chromosomes_mutation.append(k)
-            elif 'chr' + k in chromosomes_genome:
-                print('add "chr" to chromosome ' + k +' in mutation file')
-                tf = os.path.join(tempfolder, 'chr' + k + '.mutation.tsv')
-                v['chr'] = 'chr' + k
-                chromosomes_mutation.append('chr' + k)
-            else:
-                print('chromosomes in mutation file is different from the genome. try to solve that. This is usually True if datatype is RefSeq')
-                if k == 'M':
-                    for e in chromosomes_genome_description:
-                        e1, e2 = e.split(' ', maxsplit=1)
-                        if 'Homo sapiens mitochondrion, complete genome' in e2:
-                            k_new = e1
-                            print(f'    mutation chromosome change {k} to {k_new}')
-                            v['chr'] = k_new
-                            chromosomes_mutation.append(k_new)
-                            break
-                else:
-                    for e in chromosomes_genome_description:
-                        e1, e2 = e.split(' ', maxsplit=1)
-                        if f'chromosome {k},' in e2:
-                            k_new = e1
-                            print(f'    mutation chromosome change {k} to {k_new}')
-                            v['chr'] = k_new
-                            chromosomes_mutation.append(k_new)
-                            break
-                    else:
-                        print('chromosomes in mutation file', k, 'cannot find corresponding chromosome in genome file. please check')
-                        k_new = k
-                        v['chr'] = k_new
-                        chromosomes_mutation.append(k_new)
-                tf = os.path.join(tempfolder, k_new + '.mutation.tsv')
-
+            v['chr'] = k_new
+            print(chromosomes_genome, k, k_new)
+            tf = os.path.join(tempfolder, k_new + '.mutation.tsv')
+            if k_new in chromosomes_genome:
+                chromosomes_mutation.append(k_new)
             v.to_csv(tf, sep='\t',index=None)
         print('finish splitting the mutation file')
         return chromosomes_mutation
