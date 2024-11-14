@@ -33,9 +33,7 @@ With a pre-build sqlite file, it is very fast to check effect of variants in str
   - [Count number of changed proteins](#count-number-of-changed-proteins)
   - [Count number of changed amino acids (AAs)](#count-number-of-changed-amino-acids-aas)
   - [Further comparison](#further-comparison)
-- [Benchmark](#benchmark)
-  - [CPU/Memory consumption with 8 threads](#cpumemory-consumption-with-8-threads)
-  - [Running time and required memory with different threads](#running-time-and-required-memory-with-different-threads)
+- [Benchmark](#Benchmark)
 - [PrecisionProDB\_references](#precisionprodb_references)
 - [Contact Information](#contact-information)
 
