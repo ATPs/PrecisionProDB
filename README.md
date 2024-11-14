@@ -238,63 +238,12 @@ To get help for the main program, run
 python Path_of_PrecisionProDB/src/PrecisionProDB.py -h
 ```
 
-The following messages will be printed out.
-```ini
-usage: PrecisionProDB.py [-h] [-g GENOME] [-f GTF] -m MUTATIONS [-p PROTEIN] [-t THREADS] [-o OUT] [-a {GENCODE_GTF,GENCODE_GFF3,RefSeq,Ensembl_GTF,gtf}]
-                         [-k PROTEIN_KEYWORD] [-F] [-s SAMPLE] [-A] [-D {GENCODE,RefSeq,Ensembl,Uniprot,}] [-U UNIPROT] [--uniprot_min_len UNIPROT_MIN_LEN]
+[The printed message were provided on the wiki page, where further explanations can be found.](https://github.com/ATPs/PrecisionProDB/wiki/PrecisionProDB-parameters)
 
-PrecisionProDB, a personal proteogenomic tool which outputs a new reference protein based on the variants data. 
-A VCF or a tsv file can be used as the variant input. 
-If the variant file is in tsv format, at least four columns are required in the
-header row: chr, pos, ref, alt. Additional columns will be ignored. Convert the file to proper format if you have a bed file or other types of variant file.
-
-optional arguments:
-  -h, --help            show this help message and exit
-  -g GENOME, --genome GENOME
-                        the reference genome sequence in fasta format. It can be a gzip file
-  -f GTF, --gtf GTF     gtf file with CDS and exon annotations. It can be a gzip file
-  -m MUTATIONS, --mutations MUTATIONS
-                        a file stores the variants. If the file ends with ".vcf" or ".vcf.gz", treat as vcf input. Otherwise, treat as TSV input
-  -p PROTEIN, --protein PROTEIN
-                        protein sequences in fasta format. It can be a gzip file. Only proteins in this file will be checked
-  -t THREADS, --threads THREADS
-                        number of threads/CPUs to run the program. default, use all CPUs available
-  -o OUT, --out OUT     output prefix, folder path could be included. Three or five files will be saved depending on the variant file format. Outputs include the
-                        annotation for mutated transcripts, the mutated or all protein sequences, two variant files from vcf. {out}.pergeno.aa_mutations.csv,
-                        {out}.pergeno.protein_all.fa, {out}.protein_changed.fa, {out}.vcf2mutation_1/2.tsv. default "perGeno"
-  -a {GENCODE_GTF,GENCODE_GFF3,RefSeq,Ensembl_GTF,gtf}, --datatype {GENCODE_GTF,GENCODE_GFF3,RefSeq,Ensembl_GTF,gtf}
-                        input datatype, could be GENCODE_GTF, GENCODE_GFF3, RefSeq, Ensembl_GTF or gtf. default "gtf". Ensembl_GFF3 is not supported.
-  -k PROTEIN_KEYWORD, --protein_keyword PROTEIN_KEYWORD
-                        field name in attribute column of gtf file to determine ids for proteins. default "auto", determine the protein_keyword based on datatype.
-                        "transcript_id" for GENCODE_GTF, "protein_id" for "RefSeq" and "Parent" for gtf and GENCODE_GFF3
-  -F, --no_filter       default only keep variant with value "PASS" FILTER column of vcf file. if set, do not filter
-  -s SAMPLE, --sample SAMPLE
-                        sample name in the vcf to extract the variant information. default: None, extract the first sample
-  -A, --all_chromosomes
-                        default keep variant in chromosomes and ignore those in short fragments of the genome. if set, use all chromosomes including fragments when
-                        parsing the vcf file
-  -D {GENCODE,RefSeq,Ensembl,Uniprot,}, --download {GENCODE,RefSeq,Ensembl,Uniprot,}
-                        download could be 'GENCODE','RefSeq','Ensembl','Uniprot'. If set, PrecisonProDB will try to download genome, gtf and protein files from the
-                        Internet. Download will be skipped if "--genome, --gtf, --protein, (--uniprot)" were all set. Settings from "--genome, --gtf, --protein,
-                        (--uniprot), --datatype" will not be used if the files were downloaded by PrecisonProDB. default "".
-  -U UNIPROT, --uniprot UNIPROT
-                        uniprot protein sequences. If more than one file, use "," to join the files. default "". For example, "UP000005640_9606.fasta.gz", or
-                        "UP000005640_9606.fasta.gz,UP000005640_9606_additional.fasta"
-  --uniprot_min_len UNIPROT_MIN_LEN
-                        minimum length required when matching uniprot sequences to proteins annotated in the genome. default 20
-  --PEFF                If set, PEFF format file(s) will be generated. Default: do not generate PEFF file(s).
-
-
-```
-
-**Notes**
-- `-p PROTEIN, --protein PROTEIN` is a file with proteins matching the GTF file provided!
-- `-k PROTEIN_KEYWORD` is a keyword used to match the GTF file and the protein sequences. If not provided, the program will try to determine the keyword based on the datatype. The program needs the data to know the location of proteins in the genome, and codon matches to allow non-standard codons.
-- `-a {GENCODE_GTF,GENCODE_GFF3,RefSeq,Ensembl_GTF,gtf}, --datatype {GENCODE_GTF,GENCODE_GFF3,RefSeq,Ensembl_GTF,gtf}` should be set if you use the format above. For "gtf" format, the `PROTEIN_KEYWORD` and `PROTEIN` should match.
 
 # Outputs
-For more information, visit the [wiki](https://github.com/ATPs/PrecisionProDB/wiki) page.
-https://github.com/ATPs/PrecisionProDB/wiki
+[For information, visit the wiki page.](https://github.com/ATPs/PrecisionProDB/wiki/Outputs-of-PrecisionProDB)
+https://github.com/ATPs/PrecisionProDB/wiki/Outputs-of-PrecisionProDB
 
 ## Count number of changed proteins
 The number of altered proteins will be shown during running PrecisonProDB. In the header line of "PREFIX.pergeno.protein_all.fa", a word "changed" or "unchanged" is at the end of the fasta header, and users may count the number of changed proteins based on this annotation.
