@@ -63,7 +63,8 @@ Main features:
 The figure below shows how PrecisionProDB works:
 <img src="./media/Figs.design.complete.png" width="900">
 
-# Installation [⬆️](#PrecisionProDB)
+# Installation
+[⬆️](#PrecisionProDB)
 
 ## Install required packages with `conda`
 
