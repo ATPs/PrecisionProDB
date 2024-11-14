@@ -10,6 +10,8 @@ import re
 import sys
 from PrecisionProDB_core import PerGeno
 import sqlite3
+import numpy as np
+from multiprocessing import Pool
 
 TEST = False
 # TEST = True
@@ -109,6 +111,7 @@ def insert_df_protein_description(con, df_protein_description, force=False):
             {', '.join([f'{col} = excluded.{col}' for col in df_protein_description.columns if col != 'protein_id'])}
         ''', df_protein_description.values.tolist())
         
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_protein_description_seqname ON protein_description (seqname)")
         # Commit the changes
         con.commit()
     except sqlite3.Error as e:
@@ -338,27 +341,136 @@ def get_genomicLocs(con, protein_ids, chromosome=None):
     finally:
         cur.close()
 
-def get_protein_id_from_genomicLocs(con, chromosome, pos):
+
+def get_protein_ids_from_tdf_bisect(tdf, pos, pos_end=None, starts=None, ends=None):
+    """
+    Find protein IDs where genomic location falls within the start and end positions.
+    Uses binary search on both start and end positions for efficiency.
+    
+    Args:
+        tdf (pd.DataFrame): DataFrame with columns genomicLocs_start, genomicLocs_end, protein_id
+        pos (int): Start position to search
+        pos_end (int, optional): End position to search. Defaults to pos if None
+    
+    Returns:
+        list: List of protein IDs that meet the criteria
+    """
+    if pos_end is None:
+        pos_end = pos
+        
+    # Convert positions to numpy array for faster searching
+    if starts is None:
+        starts = tdf['genomicLocs_start'].values + 1
+    if ends is None:
+        ends = tdf['genomicLocs_end'].values
+    
+    # Find the rightmost position where genomicLocs_start <= pos
+    # This gives us the lower bound of our slice
+    end_idx = starts.searchsorted(pos, side='right')
+    # print(end_idx)
+    ls_idx = []
+    for i in range(end_idx-1, 0,-1):
+        if starts[i] <= pos:
+            ls_idx.append(i)
+            # print(tdf.iloc[i])
+        else:
+            break
+    
+    tdf1 = tdf.iloc[ls_idx]
+
+    return tdf1[(tdf1['genomicLocs_start'] < pos) & (tdf1['genomicLocs_end'] >= pos_end)]['protein_id'].tolist()
+
+def get_protein_ids_from_tdf(tdf, pos, pos_end=None):
+    # If pos_end is not provided, set it equal to pos
+    if pos_end is None:
+        pos_end = pos
+    
+    # Filter rows where genomicLocs_start < pos_end and genomicLocs_end >= pos
+    # This checks if the interval [pos, pos_end] is within the interval [genomicLocs_start, genomicLocs_end]
+    matching_rows = tdf[(tdf['genomicLocs_start'] < pos) & (tdf['genomicLocs_end'] >= pos_end)]
+
+    # Extract the corresponding protein_ids from the filtered rows
+    matching_protein_ids = matching_rows['protein_id'].tolist()
+
+    return matching_protein_ids
+
+
+def get_protein_id_from_genomicLocs(con, chromosome, pos, pos_end=None, threads=None):
     '''
     Given a chromosome and a position, return the protein_ids from the genomicLocs table of that chromosome,
-    where genomicLocs_start <= pos <= genomicLocs_end.
+    where genomicLocs_start < pos_end <= genomicLocs_end.
+    if pos_end is set, then genomicLocs_start < pos <= genomicLocs_end.
+    Note, genomicLocs_start is 0-based
+    pos is 1-based
+    if pos is a list, return a list for each pos
+    if threads is not None, try to use multiple threading and read a table to a dataframe
     '''
-    table_name = f'genomicLocs_{chromosome}'
-    pos = int(pos)
+    if isinstance(pos, list):
+        pos = [int(i) for i in pos]
+        if not isinstance(chromosome, list):
+            chromosome = [chromosome] * len(pos)
+        if len(chromosome) != len(pos):
+            print(pos, chromosome, 'chromosome and pos are not the same length of list')
+            return []
+        if pos_end is not None:
+            if not isinstance(pos_end, list) or len(pos_end) != len(pos):
+                print(pos, pos_end, 'pos and pos_end are not the same length of list')
+                return []
+            params = [(chromosome[i], pos[i], pos_end[i]) for i in range(len(pos))]
+        else:
+            params = [(chromosome[i], pos[i], pos[i]) for i in range(len(pos))]
+    else:
+        if pos_end is not None:
+            params = [(chromosome, int(pos), int(pos))]
+        else:
+            params = [(chromosome, int(pos), int(pos))]
     cur = con.cursor()
-    try:
-        # Query to find rows where the position falls between genomicLocs_start and genomicLocs_end
-        query = f'SELECT protein_id FROM "{table_name}" WHERE genomicLocs_start <= ? AND genomicLocs_end >= ?'
-        cur.execute(query, (pos, pos))
-        rows = cur.fetchall()
-        # Extract the protein_ids from the result rows
-        protein_ids = [row[0] for row in rows]
-        return protein_ids
-    except sqlite3.Error as e:
-        print(f"An error occurred while fetching data from the database: {e}")
-        return []
-    finally:
-        cur.close()
+    results = []
+    if threads is None:
+        for a_chromosome, a_pos, a_pos_end in params:
+            table_name = f'genomicLocs_{a_chromosome}'
+            try:
+                # Query to find rows where the position falls between genomicLocs_start and genomicLocs_end
+                query = f'SELECT protein_id FROM "{table_name}" WHERE genomicLocs_start < ? AND genomicLocs_end >= ?'
+                cur.execute(query, (a_pos, a_pos_end))
+                rows = cur.fetchall()
+                # Extract the protein_ids from the result rows
+                protein_ids = [row[0] for row in rows]
+                results.append(protein_ids)  # Add protein_ids
+            except sqlite3.Error as e:
+                print(f"An error occurred while fetching data from the database: {e}")
+                results.append([])  # Add empty list 
+    else:
+        # split params by chromosome
+        dc_params = {}
+        for a_chromosome, a_pos, a_pos_end in params:
+            if a_chromosome not in dc_params:
+                dc_params[a_chromosome] = []
+            dc_params[a_chromosome].append([a_pos,a_pos_end])
+        
+        dc_results = {}
+        for a_chromosome in dc_params:
+            table_name = f'genomicLocs_{a_chromosome}'
+            # read the whole table to dataframe
+            query = f'SELECT * FROM "{table_name}"'
+            tdf = pd.read_sql_query(query, con)
+            tdf = tdf.sort_values(by=['genomicLocs_start', 'genomicLocs_end'])
+            pool = Pool(threads)
+            ls_results = pool.starmap(get_protein_ids_from_tdf, [[tdf, pos, pos_end] for pos, pos_end in dc_params[a_chromosome]])
+            pool.close()
+            pool.join()
+            for i,j in zip(dc_params[a_chromosome], ls_results):
+                dc_results[(a_chromosome, i[0], i[1])] = j
+        
+        results = [dc_results[i] for i in params]
+        
+    
+    cur.close()
+
+    if isinstance(pos, list):
+        return results
+    else:
+        return results[0]
 
 def create_sqlite(file_sqlite, file_genome, file_gtf, file_protein, outprefix, datatype, protein_keyword, threads=None, keep_all=False):
     '''
