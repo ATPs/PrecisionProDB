@@ -65,7 +65,7 @@ Main features:
 The figure below shows how PrecisionProDB works:
 <img src="./media/Figs.design.complete.png" width="900">
 
-# Installation [⬆️](#description)
+# Installation [⬆️](#PrecisionProDB)
 
 ## Install required packages with `conda`
 
@@ -116,16 +116,16 @@ python Path_of_PrecisionProDB/src/PrecisionProDB_test.py -h
 ```
 [the output of running the test files were shown in folder test_output](/test_output/)
 
-# Citing PrecisionProDB [⬆️](#description)
+# Citing PrecisionProDB [⬆️](#PrecisionProDB)
 
 Xiaolong Cao, Jinchuan Xing, PrecisionProDB: improving the proteomics performance for precision medicine, Bioinformatics, Volume 37, Issue 19, October 2021, Pages 3361–3363, https://doi.org/10.1093/bioinformatics/btab218
 
-# Usage Information [⬆️](#description)
+# Usage Information [⬆️](#PrecisionProDB)
 
 **Note**: `python` in the example scripts below are Python3. If you are unsure about the version of your python, use `python --version` to show the version. In some systems you might need to use `python3` to specify Python3, or use the full name of `Pythons` (e.g., `/home/xcao/p/anaconda3/bin/python3.7`), if multiple versions of `Python` exist in the system or `Python` is not in the system PATH.
 
 ## Typical usage
-### The most simple case [⬆️](#description)
+### The most simple case [⬆️](#PrecisionProDB)
 
 We suppose that in most cases, users will have a variant file in [VCF](https://samtools.github.io/hts-specs) format. If there is only one sample in the VCF file, the simplest command will be:
 ```bash
@@ -135,13 +135,13 @@ python Path_of_PrecisionProDB/src/PrecisionProDB.py -m Name_of_variant_file -D G
 - `-D GENCODE` defines the annotation reference to be used. In this example, personalized protein sequences based on the `GENCODE` annotation will be generated. PrecisionProDB will download required files of GENCODE models automatically. To use gene models in other supported resources, `GENCODE` could be changed to `RefSeq`, `Ensembl` or `Uniprot`.  
 - `-o Prefix_of_output` defines the prefix of the output filenames.
 
-### VCF with multiple samples [⬆️](#description)
+### VCF with multiple samples [⬆️](#PrecisionProDB)
 If there are multiple samples in the VCF file, the `-s` option should be used to specify the sample name to be used in the VCF file.
 ```bash
 python Path_of_PrecisionProDB/src/PrecisionProDB.py -m Name_of_variant_file -D GENCODE -o Prefix_of_output -s Sample_name
 ```
 
-### VCF with local gene annotation [⬆️](#description)
+### VCF with local gene annotation [⬆️](#PrecisionProDB)
 If there is a local version of gene annotation files from Ensembl, the command will be:
 ```bash
 python Path_of_PrecisionProDB/src/PrecisionProDB.py -m Name_of_variant_file -o Prefix_of_output -s Sample_name -g Ensembl_Genome -p Ensembl_protein -f Ensembl_gtf -a Ensembl_GTF
@@ -232,7 +232,7 @@ Note:
 * e.g., `ENSP00000328207.6|ENST00000328596.10|ENSG00000186891.14|OTTHUMG00000001414|OTTHUMT00000004085.1|TNFRSF18-201|TNFRSF18|255  unchanged`, `ENSP00000424920.1|ENST00000502739.5|ENSG00000162458.13|OTTHUMG00000003079|OTTHUMT00000368044.1|FBLIM1-210|FBLIM1|144   changed`.
 
 
-## Get help information for each module [⬆️](#description)
+## Get help information for each module [⬆️](#PrecisionProDB)
 There are several files in the `src` folder. Each of them were designed in a way that can be run independently. To get help, run
 
 ```bash
@@ -249,7 +249,7 @@ python Path_of_PrecisionProDB/src/PrecisionProDB.py -h
 [The printed message were provided on the wiki page, where further explanations can be found.](https://github.com/ATPs/PrecisionProDB/wiki/PrecisionProDB-parameters)
 
 
-# Outputs [⬆️](#description)
+# Outputs [⬆️](#PrecisionProDB)
 [For information, visit the wiki page.](https://github.com/ATPs/PrecisionProDB/wiki/Outputs-of-PrecisionProDB)
 https://github.com/ATPs/PrecisionProDB/wiki/Outputs-of-PrecisionProDB
 
@@ -262,7 +262,7 @@ Generally, users may found annotations for variants in the "PREFIX.pergeno.aa_mu
 ## Further comparison
 Users may use tools like https://github.com/pwilmart/fasta_utilities to further compare the difference of trypsin digested peptides.
 
-# Benchmark [⬆️](#description)
+# Benchmark [⬆️](#PrecisionProDB)
 
 * [Benchmark of PrecisonProDB 1.0](https://github.com/ATPs/PrecisionProDB/wiki/Benchmark-of-PrecisonProDB-1.0)
 * [Benchmark of PrecisonProDB 2.0](https://github.com/ATPs/PrecisionProDB/wiki/Benchmark-of-PrecisonProDB-2.0)
@@ -271,7 +271,7 @@ Users may use tools like https://github.com/pwilmart/fasta_utilities to further 
 
 [The Genome Aggregation Database (gnomAD) project](https://gnomad.broadinstitute.org/), provide variant allele frequencies in different populations based on genomes and exomes of hundreds of thousands of individuals and this information can be integrated into a protein database. We applied PrecisionProDB to alleles from different populations from gnomAD 3.1 data. Results can be found at https://github.com/ATPs/PrecisionProDB_references.
 
-# Contact Information [⬆️](#description)
+# Contact Information [⬆️](#PrecisionProDB)
 Please leave comments on the [**issue**](https://github.com/ATPs/PrecisionProDB/issues) tab.
 
 
