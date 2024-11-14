@@ -13,9 +13,9 @@ import perChrom
 import sqlite3
 import perChrom
 
-# Global variables
-con = None
-df_mutations = None
+# # Global variables
+# con = None
+# df_mutations = None
 
 # code below for testing the the program
 TEST = False
@@ -33,24 +33,28 @@ if TEST:
 
 
 
-def process_mutation_row(row_index):
-    global con, df_mutations
-    row = df_mutations.loc[row_index]
-    chromosome, pos = row['chr'], row['pos']
-    protein_ids = buildSqlite.get_protein_id_from_genomicLocs(con, chromosome, pos)
-    return [row.name, protein_ids]
+# def process_mutation_row(row_index):
+#     # global con, df_mutations
+#     row = df_mutations.loc[row_index]
+#     chromosome, pos = row['chr'], row['pos']
+#     protein_ids = buildSqlite.get_protein_id_from_genomicLocs(con, chromosome, pos)
+#     return [row.name, protein_ids]
 
-def get_protein_id_from_df_mutations(cpu_counts=10):
+def get_protein_id_from_df_mutations(df_mutations, file_sqlite, cpu_counts=10):
     '''
     get protein_id from df_mutations
     df_mutation is a dataframe with the mutations
     return a dictionary, with protein_id as keys, and list of df_mutation index as values
     '''
-    global df_mutations, con
-    pool = Pool(cpu_counts)
-    results = pool.map(process_mutation_row, list(df_mutations.index))
-    pool.close()
-    pool.join()
+    con = buildSqlite.get_connection(file_sqlite)
+    if df_mutations.shape[0] < 1000:
+        threads = None
+    else:
+        threads = cpu_counts
+
+    protein_ids = buildSqlite.get_protein_id_from_genomicLocs(con, list(df_mutations['chr']), list(df_mutations['pos']), list(df_mutations['pos_end']), threads = threads)
+    
+    results = [[i,j] for i,j in zip(df_mutations.index, protein_ids)]
     
     combined_results = {}
     for indices, protein_ids in results:
@@ -84,7 +88,7 @@ class PerChrom_sqlite(object):
         self.chromosome = chromosome # chromosome name
         
         # dataframe to store the mutation information
-        global df_mutations
+        # global df_mutations
         
         if isinstance(self.file_mutations, pd.DataFrame):
             df_mutations = self.file_mutations
@@ -97,9 +101,10 @@ class PerChrom_sqlite(object):
         else:
             print(self.chromosome, 'No mutation file provided, will not do mutation analysis')
         
-        global con
-        if con is None:
-            con = buildSqlite.get_connection(self.file_sqlite)
+        self.con = buildSqlite.get_connection(self.file_sqlite)
+        # global con
+        # if con is None:
+        #     con = buildSqlite.get_connection(self.file_sqlite)
 
 
     def run_perChrom(self, save_results = True):
@@ -110,25 +115,28 @@ class PerChrom_sqlite(object):
         outprefix = self.outprefix
         chromosome = self.chromosome
         df_mutations = self.df_mutations
-        global con
+        # global con
 
         # get transcripts that will be used based on the self_mutations
-        dc_transcript2mutations = get_protein_id_from_df_mutations(cpu_counts=cpu_counts)
+        dc_transcript2mutations = get_protein_id_from_df_mutations(df_mutations, file_sqlite=self.file_sqlite, cpu_counts=cpu_counts)
 
         # get df_transcript2 based on dc_transcript2mutations
         protein_ids = tuple(dc_transcript2mutations.keys())
         query = f"SELECT * FROM protein_description WHERE protein_id IN {protein_ids}"
-        df_transcript2 = pd.read_sql_query(query, con)        # assign mutations to each transcript. 
-        
+        df_transcript2 = pd.read_sql_query(query, self.con)        # assign mutations to each transcript. 
+        if df_transcript2.shape[0] == 0:
+            print('No protein sequences to change for chromosome', chromosome)
+            return df_transcript2
         # update df_transcript2
         df_transcript2 = df_transcript2.set_index('protein_id')
         df_transcript2['genomicLocs'] = df_transcript2['genomicLocs'].apply(eval)
         # add column 'mutations', with list of mutation index in df_mutations
-        pool = Pool(cpu_counts)
-        results = pool.starmap(perChrom.getMutations, [[df_transcript2, df_mutations, i] for i in df_transcript2.index])
-        pool.close()
-        pool.join()
-        df_transcript2['mutations'] = results
+        # pool = Pool(cpu_counts)
+        # results = pool.starmap(perChrom.getMutations, [[df_transcript2, df_mutations, i] for i in df_transcript2.index])
+        # pool.close()
+        # pool.join()
+        df_transcript2['mutations'] = [dc_transcript2mutations[i] for i in df_transcript2.index]
+        df_transcript2 = df_transcript2[df_transcript2['mutations'].str.len() > 0]
         
         # for RefSeq, sometimes the GTF annotation does not agree with the protein sequence, which means the len(CDS)/len(protein) != 3, find those cases and do not change the proteins
         if datatype == 'RefSeq':
@@ -191,7 +199,7 @@ if __name__ == '__main__':
     chromosome = f.chromosome
     datatype = f.datatype
     
-    con = buildSqlite.get_connection(file_sqlite)
+    # con = buildSqlite.get_connection(file_sqlite)
     df_mutations = perChrom.parse_mutation(file_mutations=file_mutations, chromosome=chromosome)
 
     perchrom_sqlite = PerChrom_sqlite(file_sqlite = file_sqlite,
