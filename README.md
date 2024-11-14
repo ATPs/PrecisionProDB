@@ -4,6 +4,7 @@
 
 PrecisionProDB is a Python package for proteogenomics, which can generate a customized protein database for peptide search in mass spectrometry.
 
+# What's new in PrecisionProDB2
 PrecisionProDB2 has been developed to maintain compatibility with the previous version of the software. Notably, it introduces the option of utilizing SQLite files for the storage of intermediate data. This innovation has significantly reduced the runtime of the program, particularly when handling smaller VCF files.
 
 With a pre-build sqlite file, it is very fast to check effect of variants in string format like `"chr1-942451-T-C,1-6253878-C-T,1-2194700-C-G,1-1719406-G-A"`.
