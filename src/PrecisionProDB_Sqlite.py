@@ -49,13 +49,16 @@ def runSinglePerChromSqlite(file_sqlite, file_mutations, tempfolder, threads, ch
                     outprefix = outprefix,
                     datatype = datatype,
                     chromosome = chromosome)
-    print('run perChrom for chromosome', chromosome)
+    print('run perchrom_sqlite for chromosome', chromosome)
+    # perchrom_sqlite.run_perChrom()
+    # print('finished running perchrom_sqlite for chromosome:', chromosome)
+    # return chromosome
     try:
         perchrom_sqlite.run_perChrom()
         print('finished running perchrom_sqlite for chromosome:', chromosome)
         return chromosome
-    except:
-        print('cannot run perchrom_sqlite for chromosome', chromosome, 'Proteins will be unchanged.')
+    except Exception as e:
+        print('cannot run perchrom_sqlite for chromosome', chromosome, 'Proteins will be unchanged. Error message:', e)
         return None
 
 
@@ -80,7 +83,7 @@ def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_ke
     chromosomes_mutation = pergeno.splitMutationByChromosome(chromosomes_genome_description=chromosomes_genome_description, chromosomes_genome=chromosomes_genome)
 
     # run runSinglePerChromSqlite
-    chromosomes_mutated = [runSinglePerChromSqlite(file_sqlite, file_mutations, tempfolder, threads, chromosome, datatype) for chromosome in chromosomes_mutation]
+    chromosomes_mutated = [runSinglePerChromSqlite(file_sqlite, f'{tempfolder}/{chromosome}.mutation.tsv', tempfolder, threads, chromosome, datatype) for chromosome in chromosomes_mutation]
     # successful chromosomes
     chromosomes_mutated = [e for e in chromosomes_mutated if e is not None]
     # collect mutation annotations
