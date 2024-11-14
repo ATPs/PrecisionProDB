@@ -13,7 +13,8 @@ With a pre-build sqlite file, it is very fast to check effect of variants in str
 
 [For more running examples, visit the example folder](/examples/)
 
-- [PrecisionProDB](#precisionprodb)
+# Table of Contents
+
 - [Description](#description)
 - [Installation](#installation)
 - [Citing PrecisionProDB](#citing-precisionprodb)
