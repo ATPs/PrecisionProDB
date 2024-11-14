@@ -26,7 +26,7 @@ if __name__ == '__main__':
     parser.add_argument('-F', '--no_filter', help='default only keep variant with value "PASS" FILTER column of vcf file. if set, do not filter', action='store_true')
     parser.add_argument('-s', '--sample', help='sample name in the vcf to extract the variant information. default: None, extract the first sample. ', default=None)
     parser.add_argument('-A','--all_chromosomes', help='default keep variant in chromosomes and ignore those in short fragments of the genome. if set, use all chromosomes including fragments when parsing the vcf file', action='store_true')
-    parser.add_argument('-D','--download', help='''download could be 'GENCODE','RefSeq','Ensembl','Uniprot'. If set, PrecisonProDB will try to download genome, gtf and protein files from the Internet. Download will be skipped if "--genome, --gtf, --protein, (--uniprot)" were all set. Settings from "--genome, --gtf, --protein, (--uniprot), --datatype" will not be used if the files were downloaded by PrecisonProDB. default "". Note, if --sqlite is set, will not download any files ''', default='', type=str, choices=['GENCODE','RefSeq','Ensembl','Uniprot',''])
+    parser.add_argument('-D','--download', help='''download could be 'GENCODE','RefSeq','Ensembl','Uniprot', 'CHM13'. If set, PrecisonProDB will try to download genome, gtf and protein files from the Internet. Download will be skipped if "--genome, --gtf, --protein, (--uniprot)" were all set. Settings from "--genome, --gtf, --protein, (--uniprot), --datatype" will not be used if the files were downloaded by PrecisonProDB. default "". Note, if --sqlite is set, will not download any files ''', default='', type=str, choices=['GENCODE','RefSeq','Ensembl','Uniprot','CHM13',''])
     parser.add_argument('-U','--uniprot', help='''uniprot protein sequences. If more than one file, use "," to join the files. default "". For example, "UP000005640_9606.fasta.gz", or "UP000005640_9606.fasta.gz,UP000005640_9606_additional.fasta" ''', default='', type=str)
     parser.add_argument('--uniprot_min_len', help='''minimum length required when matching uniprot sequences to proteins annotated in the genome. default 20 ''', default=20, type=int)
     parser.add_argument('--PEFF', help='If set, PEFF format file(s) will be generated. Default: do not generate PEFF file(s).', action='store_true')
@@ -82,6 +82,8 @@ if __name__ == '__main__':
                     datatype = 'RefSeq'
                 elif download == 'ENSEMBL':
                     datatype = 'Ensembl_GTF'
+                elif download == 'CHM13':
+                    datatype = 'RefSeq'
                 else:
                     print('download is', download, 'which is not possible...')
         else:

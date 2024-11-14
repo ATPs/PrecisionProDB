@@ -86,7 +86,7 @@ def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_ke
     # collect mutation annotations
     files_mutAnno = ['{}/{}.aa_mutations.csv'.format(tempfolder, chromosome) for chromosome in chromosomes_mutated]
     file_mutAnno = outprefix + '.pergeno.aa_mutations.csv'
-    df_mutAnno = pd.concat([pd.read_csv(f, sep='\t') for f in files_mutAnno], ignore_index=True)
+    df_mutAnno = pd.concat([pd.read_csv(f, sep='\t') for f in files_mutAnno if os.path.exists(f)], ignore_index=True)
     print('total number of proteins with AA mutation:', df_mutAnno.shape[0])
     df_mutAnno.to_csv(file_mutAnno, sep='\t', index=None)
 
@@ -98,6 +98,8 @@ def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_ke
     fout_proteins_all = open(file_proteins_all, 'w')
     proteins_changed_ids = []
     for f in files_proteins_changed:
+        if not os.path.exists(f):
+            continue
         for s in SeqIO.parse(f,'fasta'):
             fout_proteins_all.write('>{}\n{}\n'.format(s.description, str(s.seq)))
             if s.description.endswith('\tchanged'):

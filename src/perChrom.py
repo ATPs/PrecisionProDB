@@ -212,11 +212,7 @@ def getPositionsFromLocs_faster(locs):
     locs like [(65564, 65573), (69036, 71585)]
     return a list of positions
     '''
-    result_arrays = []
-    for s, e in locs:
-        result_arrays.append(np.arange(s+1, e+1))  # Create a range for each (s,e) pair
-    
-    return list(np.concatenate(result_arrays))  # Concatenate all arrays into a single NumPy array
+    return list(np.concatenate([np.arange(s+1, e+1) for s, e in locs]))  # Concatenate all arrays into a single NumPy array
 
 
 def translateCDSplus(transcript_id, df_transcript2):

@@ -566,7 +566,7 @@ class PerGeno(object):
         # collect mutation annotations
         files_mutAnno = ['{}/{}.aa_mutations.csv'.format(self.tempfolder, chromosome) for chromosome in chromosomes_mutated]
         file_mutAnno = self.outprefix + '.pergeno.aa_mutations.csv'
-        df_mutAnno = pd.concat([pd.read_csv(f, sep='\t') for f in files_mutAnno], ignore_index=True)
+        df_mutAnno = pd.concat([pd.read_csv(f, sep='\t') for f in files_mutAnno if os.path.exists(f)], ignore_index=True)
         print('total number of proteins with AA mutation:', df_mutAnno.shape[0])
         df_mutAnno.to_csv(file_mutAnno, sep='\t', index=None)
 
@@ -578,6 +578,8 @@ class PerGeno(object):
         fout_proteins_changed = open(file_proteins_changed, 'w')
         fout_proteins_all = open(file_proteins_all, 'w')
         for f in files_proteins_changed:
+            if not os.path.exists(f):
+                continue
             proteins_changed_ids = []
             for s in SeqIO.parse(f,'fasta'):
                 fout_proteins_all.write('>{}\n{}\n'.format(s.description, str(s.seq)))
