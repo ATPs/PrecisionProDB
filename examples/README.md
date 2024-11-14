@@ -26,13 +26,38 @@ Check each of the subfolder to see how to run the testing codes.
 
 ## Run with the variant file only
 
-PrecisonProDB can download the latest version of required files automatically from the Internet, so users can run get the results with the variant file only. However, as downloading large files may takesome time, the running time will be longer.
+PrecisonProDB can download the latest version of required files automatically from the Internet, so users can run get the results with the variant file only. However, as downloading large files may take some time, the running time will be longer.
 
 Check this page for explanation of output files  
 https://github.com/ATPs/PrecisionProDB/wiki/Outputs-of-PrecisionProDB
 
-### variants in tsv format
+### enable sqlite
+```bash
+cd $PATH_OF_PRECISONPRODB
+cd examples
+python ../src/PrecisionProDB.py -m gnomAD.variant.txt.gz -D Ensembl -o ./PREFIX.tsv -a Ensembl_GTF --PEFF \
+                    -S path_to_file_sqlite
+
 ```
+If `path_to_file_sqlite` does not exist, a sqlite file will be created.
+
+If `path_to_file_sqlite` is provided, the program will use informations stored in the sqlite file to speed up.
+
+file `path_to_file_sqlite` can be build in advance with the following command.
+
+```bash
+cd $PATH_OF_PRECISONPRODB
+python ./src/buildSqlite.py  -g GRCh38.p14.genome.fa.gz \
+                    -p gencode.v47.pc_translations.fa.gz \
+                    -f gencode.v47.chr_patch_hapl_scaff.annotation.gtf.gz \
+                    -o GENCODE.tsv.buildSqlite \
+                    -a GENCODE_GTF \
+                    -S GENCODE.sqlite \
+                    -t 8
+```
+
+### variants in tsv format
+```bash
 cd $PATH_OF_PRECISONPRODB
 cd examples
 python ../src/PrecisionProDB.py -m gnomAD.variant.txt.gz -D Ensembl -o ./PREFIX.tsv -a Ensembl_GTF --PEFF
