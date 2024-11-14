@@ -108,6 +108,13 @@ git clone https://github.com/ATPs/PrecisionProDB.git
 
 To install other verisons, download from the [release page](https://github.com/ATPs/PrecisionProDB/releases) directly.
 
+## run test files
+
+```bash
+python Path_of_PrecisionProDB/src/PrecisionProDB_test.py -h
+```
+[the output of running the test files were shown in folder test_output](/test_output/)
+
 # Citing PrecisionProDB
 
 Xiaolong Cao, Jinchuan Xing, PrecisionProDB: improving the proteomics performance for precision medicine, Bioinformatics, Volume 37, Issue 19, October 2021, Pages 3361–3363, https://doi.org/10.1093/bioinformatics/btab218
@@ -256,24 +263,12 @@ Users may use tools like https://github.com/pwilmart/fasta_utilities to further 
 
 # Benchmark
 
-Tested with a computing node with Intel Xeon CPU E5-2695 v4 @ 2.10GHz and 256GB memory, with GENCODE gene models and a variant file in text format from gnomAD 3.1 as input.
-
-* Depending on the available resources, a `thread` of 8 to 12 is recommendded.
-* If the variant file is in text format, typical running time will be 15 to 20 minutes
-* If the variant file is in VCF format, typical running time will be 30 to 40 minutes.
-
-## CPU/Memory consumption with 8 threads
-
-<img src="./media/CPU_MEM_vs_time.svg" width="900">
-
-## Running time and required memory with different threads
-
-<img src="./media/Time_MEM_vs_threads.svg" width="900">
+* [Benchmark of PrecisonProDB 1.0](https://github.com/ATPs/PrecisionProDB/wiki/Benchmark-of-PrecisonProDB-1.0)
+* [Benchmark of PrecisonProDB 2.0](https://github.com/ATPs/PrecisionProDB/wiki/Benchmark-of-PrecisonProDB-2.0)
 
 # PrecisionProDB_references
 
 [The Genome Aggregation Database (gnomAD) project](https://gnomad.broadinstitute.org/), provide variant allele frequencies in different populations based on genomes and exomes of hundreds of thousands of individuals and this information can be integrated into a protein database. We applied PrecisionProDB to alleles from different populations from gnomAD 3.1 data. Results can be found at https://github.com/ATPs/PrecisionProDB_references.
-
 
 # Contact Information
 Please leave comments on the [**issue**](https://github.com/ATPs/PrecisionProDB/issues) tab.
