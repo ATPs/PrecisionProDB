@@ -2,6 +2,7 @@
 
 file [testing.log](testing.log) contains the output of the test scripts and sample scripts of running PrecisonProDB in different modes.
 
+file [test_running_summary.txt](test_running_summary.txt)
 test scripts looks like
 
 ```bash
