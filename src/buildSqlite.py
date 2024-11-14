@@ -493,7 +493,7 @@ if __name__ == '__main__':
     parser.add_argument('-f', '--gtf', help='Path to the GTF file with gene annotations', required=True)
     parser.add_argument('-o', '--out', help='''output prefix. used to store temp files. default "perGeno" ''', default="perGeno")
     parser.add_argument('-a', '--datatype', help='''input datatype, could be GENCODE_GTF, GENCODE_GFF3, RefSeq, Ensembl_GTF or gtf. default "gtf". Ensembl_GFF3 is not supported. ''', default='gtf', type=str, choices=['GENCODE_GTF', 'GENCODE_GFF3','RefSeq','Ensembl_GTF','gtf'])
-    parser.add_argument('-k', '--protein_keyword', help='Keyword for filtering protein sequences', default='auto')
+    parser.add_argument('-k', '--protein_keyword', help='field name in attribute column of gtf file to determine ids for proteins. default "auto", determine the protein_keyword based on datatype. "transcript_id" for GENCODE_GTF, "protein_id" for "RefSeq" and "Parent" for gtf and GENCODE_GFF3', default='auto')
     parser.add_argument('--keep_all', help='If set, do not delete files generated during the run', action='store_true')
     
     if TEST:
