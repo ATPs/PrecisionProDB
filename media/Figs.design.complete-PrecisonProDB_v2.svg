@@ -1,0 +1,288 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="a" data-name="Layer 1" xmlns="http://www.w3.org/2000/svg" width="3.83in" height="4.33in" viewBox="0 0 275.5 311.6">
+  <defs>
+    <style>
+      .b {
+        stroke: #000;
+        stroke-width: .5px;
+      }
+
+      .b, .c, .d, .e, .f, .g, .h {
+        fill: none;
+        stroke-miterlimit: 10;
+      }
+
+      .i, .j, .k, .l, .m, .n, .o {
+        font-family: ArialMT, Arial;
+      }
+
+      .i, .l, .p, .n, .o {
+        font-size: 6px;
+      }
+
+      .i, .p {
+        fill: #006837;
+      }
+
+      .c, .d, .g, .h {
+        stroke-width: .52px;
+      }
+
+      .c, .e {
+        stroke: blue;
+      }
+
+      .j, .q, .m {
+        font-size: 6px;
+      }
+
+      .d {
+        stroke-dasharray: 1 1;
+      }
+
+      .d, .g, .h {
+        stroke: #f7931e;
+      }
+
+      .r {
+        letter-spacing: -.06em;
+      }
+
+      .l {
+        fill: blue;
+      }
+
+      .s {
+        fill: #cff;
+      }
+
+      .m {
+        fill: #f7931e;
+      }
+
+      .t {
+        letter-spacing: -.02em;
+      }
+
+      .e, .f {
+        stroke-width: .52px;
+      }
+
+      .f {
+        stroke: red;
+      }
+
+      .o {
+        fill: red;
+      }
+
+      .u {
+        letter-spacing: -.04em;
+      }
+
+      .v {
+        letter-spacing: -.09em;
+      }
+
+      .w {
+        letter-spacing: -.07em;
+      }
+
+      .g {
+        stroke-dasharray: 1 1;
+      }
+    </style>
+  </defs>
+  <g>
+    <line class="b" x1="150.59" y1="20.59" x2="150.59" y2="27.31"/>
+    <polygon points="148.55 25.65 148.92 25.31 150.59 27.12 152.27 25.31 152.64 25.65 150.59 27.85 148.55 25.65"/>
+  </g>
+  <g>
+    <line class="b" x1="107.89" y1="104.04" x2="107.89" y2="132.49"/>
+    <polygon points="105.84 130.83 106.21 130.49 107.89 132.3 109.57 130.49 109.93 130.83 107.89 133.03 105.84 130.83"/>
+  </g>
+  <g>
+    <line class="b" x1="151.08" y1="258.2" x2="151.08" y2="266.14"/>
+    <polygon points="149.03 264.48 149.4 264.14 151.08 265.94 152.76 264.14 153.12 264.48 151.08 266.68 149.03 264.48"/>
+  </g>
+  <g>
+    <line class="b" x1="107.89" y1="144.92" x2="107.89" y2="195.74"/>
+    <polygon points="105.84 194.08 106.21 193.74 107.89 195.55 109.57 193.74 109.93 194.08 107.89 196.28 105.84 194.08"/>
+  </g>
+  <g>
+    <path class="s" d="M178.2,34.88c0,2.95-2.67,5.33-5.96,5.33h-41.36c-3.29,0-5.96-2.39-5.96-5.33h0c0-2.95,2.67-5.33,5.96-5.33h41.36c3.29,0,5.96,2.39,5.96,5.33h0Z"/>
+    <text class="j" transform="translate(131.72 36.63)"><tspan x="0" y="0">PrecisionProDB</tspan></text>
+  </g>
+  <g>
+    <path class="s" d="M186.17,55.6c0,2.95-2.67,5.33-5.96,5.33h-57.3c-3.29,0-5.96-2.39-5.96-5.33h0c0-2.95,2.67-5.33,5.96-5.33h57.3c3.29,0,5.96,2.39,5.96,5.33h0Z"/>
+    <text class="j" transform="translate(123.75 57.35)"><tspan x="0" y="0">PrecisionProDB_sqlite</tspan></text>
+  </g>
+  <g>
+    <path class="s" d="M178.2,273.51c0,2.95-2.67,5.33-5.96,5.33h-41.36c-3.29,0-5.96-2.39-5.96-5.33h0c0-2.95,2.67-5.33,5.96-5.33h41.36c3.29,0,5.96,2.39,5.96,5.33h0Z"/>
+    <text class="j" transform="translate(131.72 275.26)"><tspan x="0" y="0">PrecisionProDB</tspan></text>
+  </g>
+  <g>
+    <path class="s" d="M134.53,139.58c0,2.95-2.67,5.33-5.96,5.33h-41.36c-3.29,0-5.96-2.39-5.96-5.33h0c0-2.95,2.67-5.33,5.96-5.33h41.36c3.29,0,5.96,2.39,5.96,5.33h0Z"/>
+    <text class="j" transform="translate(87.58 141.33)"><tspan x="0" y="0">perChromSqlite</tspan></text>
+  </g>
+  <g>
+    <path class="s" d="M143.1,97.6c0,2.95-3.24,5.33-7.24,5.33h-50.19c-4,0-7.24-2.39-7.24-5.33h0c0-2.95,3.24-5.33,7.24-5.33h50.19c4,0,7.24,2.39,7.24,5.33h0Z"/>
+    <text class="j" transform="translate(86.09 99.35)"><tspan x="0" y="0">runPerChomSqlite</tspan></text>
+  </g>
+  <g>
+    <path class="s" d="M143.1,202.61c0,2.95-3.24,5.33-7.24,5.33h-50.19c-4,0-7.24-2.39-7.24-5.33h0c0-2.95,3.24-5.33,7.24-5.33h50.19c4,0,7.24,2.39,7.24,5.33h0Z"/>
+    <text class="j" transform="translate(84.8 204.36)"><tspan x="0" y="0">runPerChomSqlite</tspan></text>
+  </g>
+  <g>
+    <path class="s" d="M103.1,306.26c0,2.95-3.24,5.33-7.24,5.33h-50.19c-4,0-7.24-2.39-7.24-5.33h0c0-2.95,3.24-5.33,7.24-5.33h50.19c3.99,0,7.24,2.39,7.24,5.33h0Z"/>
+    <text class="j" transform="translate(40.86 308.01)"><tspan x="0" y="0">extractMutatedUniprot</tspan></text>
+  </g>
+  <g>
+    <path class="s" d="M274.31,306.26c0,2.95-3.24,5.33-7.24,5.33h-50.19c-4,0-7.24-2.39-7.24-5.33h0c0-2.95,3.24-5.33,7.24-5.33h50.19c4,0,7.24,2.39,7.24,5.33h0Z"/>
+    <text class="j" transform="translate(213.38 308.01)"><tspan x="0" y="0">generatePEFFoutput</tspan></text>
+  </g>
+  <g>
+    <text class="l" transform="translate(122.23 6.83)"><tspan x="0" y="0">Reference</tspan><tspan x="2.33" y="7.2">Genome</tspan></text>
+    <rect class="c" x="121.33" y=".26" width="29.49" height="17.76"/>
+  </g>
+  <g>
+    <text class="l" transform="translate(158.89 13.8)"><tspan x="0" y="0">Genes</tspan></text>
+    <rect class="e" x="154.14" y="7.66" width="28.17" height="8.5"/>
+    <rect class="e" x="153.2" y=".29" width="61.38" height="17.71"/>
+    <text class="l" transform="translate(171.32 5.88)"><tspan x="0" y="0">Annotation</tspan></text>
+    <rect class="e" x="184.95" y="7.66" width="28.17" height="8.5"/>
+    <text class="l" transform="translate(187.7 14.49)"><tspan x="0" y="0">Proteins</tspan></text>
+  </g>
+  <text class="i" transform="translate(213.38 261.11)"><tspan x="0" y="0">Generate PEFF file(s)</tspan><tspan x="0" y="7.2">by adding</tspan><tspan class="r" x="26.02" y="7.2"> </tspan><tspan x="27.36" y="7.2">A</tspan><tspan class="r" x="31.36" y="7.2">A</tspan><tspan x="35.03" y="7.2" xml:space="preserve"> mutation</tspan><tspan x="0" y="14.4">annotations</tspan></text>
+  <text class="i" transform="translate(64.22 116.29)"><tspan x="0" y="0">Split variant file</tspan><tspan x="-2" y="7.2">by chromosome</tspan></text>
+  <text class="i" transform="translate(26.31 260.13)"><tspan x="0" y="0">Match UniProt sequences</tspan><tspan x="-5.68" y="7.2">with Ensembl and generate </tspan><tspan x="29.02" y="14.4">UniProt Output</tspan></text>
+  <g>
+    <line class="b" x1="107.89" y1="208.95" x2="131.75" y2="239.28"/>
+    <polygon points="129.12 239.24 129.19 238.74 131.63 239.13 131.83 236.67 132.33 236.71 132.08 239.7 129.12 239.24"/>
+  </g>
+  <text class="k" transform="translate(5.07 217.11)"><tspan class="p" x="0" y="0">Combine results from </tspan><tspan class="q" x="58.68" y="0">perChromSqlite</tspan></text>
+  <text class="i" transform="translate(15.4 153.98)"><tspan x="0" y="0">Assign variants to each transcript;</tspan><tspan x="-13.02" y="7.2">Assign each</tspan><tspan class="r" x="19.66" y="7.2"> </tspan><tspan x="21" y="7.2">A</tspan><tspan class="r" x="25" y="7.2">A</tspan><tspan x="28.67" y="7.2" xml:space="preserve"> from protein sequence</tspan><tspan x="34" y="14.4">to get codon-A</tspan><tspan class="r" x="73.03" y="14.4">A</tspan><tspan x="76.7" y="14.4" xml:space="preserve"> pair;</tspan><tspan x="13.51" y="21.6">Add variants to CDS+3’UTR;</tspan><tspan class="u" x=".21" y="28.8">T</tspan><tspan x="3.66" y="28.8">ranslate with mutated sequence;</tspan><tspan x="9.45" y="36">Summarize e</tspan><tspan class="t" x="44.8" y="36">f</tspan><tspan x="46.36" y="36">fects of variants </tspan></text>
+  <g>
+    <rect class="e" x="87.58" y=".29" width="30.93" height="17.71"/>
+    <text class="l" transform="translate(88.62 7.14) scale(1.07 1)"><tspan x="0" y="0">Individual </tspan><tspan class="w" x="2.73" y="7.2">V</tspan><tspan x="6.28" y="7.2">ariants</tspan></text>
+  </g>
+  <g>
+    <rect class="f" x="125.22" y="242.36" width="52.68" height="14.89"/>
+    <text class="o" transform="translate(126.05 248.11) scale(1.07 1)"><tspan x="0" y="0">Custom reference </tspan><tspan x="2.33" y="7.2">protein database</tspan></text>
+  </g>
+  <g>
+    <line class="b" x1="150.59" y1="70.98" x2="122.82" y2="89.79"/>
+    <polygon points="123.05 87.17 123.54 87.28 122.98 89.68 125.42 90.06 125.34 90.55 122.37 90.09 123.05 87.17"/>
+  </g>
+  <g>
+    <line class="b" x1="150.59" y1="42.02" x2="150.59" y2="48.74"/>
+    <polygon points="148.55 47.08 148.92 46.74 150.59 48.55 152.27 46.74 152.64 47.08 150.59 49.28 148.55 47.08"/>
+  </g>
+  <g>
+    <line class="b" x1="150.59" y1="61.92" x2="150.59" y2="68.64"/>
+    <polygon points="148.55 66.98 148.92 66.64 150.59 68.45 152.27 66.64 152.64 66.98 150.59 69.18 148.55 66.98"/>
+  </g>
+  <text class="n" transform="translate(125.37 79.07)"><tspan x="0" y="0">No</tspan></text>
+  <text class="o" transform="translate(218.12 11.91)"><tspan x="0" y="0">--sqlite enabled</tspan></text>
+  <g>
+    <line class="b" x1="124.92" y1="276.8" x2="89.55" y2="299.35"/>
+    <polygon points="89.85 296.73 90.33 296.86 89.71 299.24 92.13 299.69 92.04 300.18 89.09 299.64 89.85 296.73"/>
+  </g>
+  <g>
+    <line class="b" x1="61.72" y1="298.68" x2="124.76" y2="258.49"/>
+    <polygon points="124.46 261.11 123.98 260.98 124.6 258.6 122.18 258.15 122.27 257.66 125.22 258.2 124.46 261.11"/>
+  </g>
+  <g>
+    <line class="b" x1="176.59" y1="278.15" x2="211.5" y2="299.89"/>
+    <polygon points="209.01 300.75 208.91 300.26 211.33 299.79 210.69 297.41 211.17 297.28 211.96 300.18 209.01 300.75"/>
+  </g>
+  <g>
+    <line class="b" x1="245.39" y1="298.9" x2="179.22" y2="257.69"/>
+    <polygon points="181.7 256.83 181.8 257.32 179.38 257.79 180.02 260.17 179.54 260.3 178.76 257.41 181.7 256.83"/>
+  </g>
+  <text class="o" transform="translate(107 295.1)"><tspan x="0" y="0">UniProt models</tspan><tspan x="0" y="7.2">wanted?</tspan></text>
+  <text class="o" transform="translate(169.26 294.31)"><tspan x="0" y="0">PEFF file </tspan><tspan x="3.65" y="7.2">wanted?</tspan></text>
+  <g>
+    <polyline class="h" points="145.83 224.6 145.83 225.1 145.33 225.1"/>
+    <line class="d" x1="144.33" y1="225.1" x2="1.26" y2="225.1"/>
+    <polyline class="h" points=".76 225.1 .26 225.1 .26 224.6"/>
+    <line class="g" x1=".26" y1="223.59" x2=".26" y2="91.52"/>
+    <polyline class="h" points=".26 91.01 .26 90.51 .76 90.51"/>
+    <line class="d" x1="1.75" y1="90.51" x2="144.83" y2="90.51"/>
+    <polyline class="h" points="145.33 90.51 145.83 90.51 145.83 91.01"/>
+    <line class="g" x1="145.83" y1="92.02" x2="145.83" y2="224.09"/>
+  </g>
+  <text class="m" transform="translate(.26 89.01)"><tspan x="0" y="0">runPerChomSqlite</tspan></text>
+  <g>
+    <line class="b" x1="204.87" y1="45.17" x2="186.65" y2="55.33"/>
+    <polygon points="187.1 52.74 187.57 52.89 186.81 55.24 189.21 55.83 189.09 56.31 186.17 55.6 187.1 52.74"/>
+  </g>
+  <text class="n" transform="translate(191.03 34.89)"><tspan x="0" y="0">sqlite file not provided</tspan></text>
+  <g>
+    <line class="b" x1="180.23" y1="34.96" x2="204.13" y2="40.29"/>
+    <polygon points="202.07 41.93 201.82 41.5 203.94 40.25 202.55 38.22 202.96 37.94 204.66 40.41 202.07 41.93"/>
+  </g>
+  <g>
+    <path class="s" d="M240.06,43.03c0,2.95-2.67,5.33-5.96,5.33h-22.3c-3.29,0-5.96-2.39-5.96-5.33h0c0-2.94,2.67-5.33,5.96-5.33h22.3c3.29,0,5.96,2.39,5.96,5.33h0Z"/>
+    <text class="j" transform="translate(209.65 44.78)"><tspan x="0" y="0">buildSqlite</tspan></text>
+  </g>
+  <text class="i" transform="translate(195.52 57.35)"><tspan x="0" y="0">build sqlite file</tspan></text>
+  <g>
+    <line class="b" x1="186.39" y1="103.94" x2="186.39" y2="113.56"/>
+    <polygon points="184.35 111.91 184.71 111.57 186.39 113.37 188.07 111.57 188.44 111.91 186.39 114.11 184.35 111.91"/>
+  </g>
+  <g>
+    <line class="b" x1="186.9" y1="185.11" x2="186.9" y2="198.4"/>
+    <polygon points="184.85 196.74 185.22 196.4 186.9 198.21 188.57 196.4 188.94 196.74 186.9 198.94 184.85 196.74"/>
+  </g>
+  <g>
+    <line class="b" x1="186.9" y1="211.17" x2="164.86" y2="239.18"/>
+    <polygon points="164.27 236.62 164.77 236.57 164.97 239.03 167.41 238.65 167.49 239.14 164.52 239.61 164.27 236.62"/>
+  </g>
+  <g>
+    <line class="b" x1="213.81" y1="166.44" x2="213.81" y2="175.04"/>
+    <polygon points="211.76 173.39 212.13 173.05 213.81 174.85 215.49 173.05 215.85 173.39 213.81 175.59 211.76 173.39"/>
+  </g>
+  <g>
+    <line class="b" x1="168.97" y1="166.44" x2="168.97" y2="175.04"/>
+    <polygon points="166.92 173.39 167.29 173.05 168.97 174.85 170.64 173.05 171.01 173.39 168.97 175.59 166.92 173.39"/>
+  </g>
+  <g>
+    <path class="s" d="M211.96,120.16c0,2.95-2.67,5.33-5.96,5.33h-41.36c-3.29,0-5.96-2.39-5.96-5.33h0c0-2.95,2.67-5.33,5.96-5.33h41.36c3.29,0,5.96,2.39,5.96,5.33h0Z"/>
+    <text class="j" transform="translate(168.89 121.91)"><tspan x="0" y="0">vcf2mutation</tspan></text>
+  </g>
+  <g>
+    <path class="s" d="M227.21,97.5c0,2.95-3.24,5.33-7.24,5.33h-58.3c-4,0-7.24-2.39-7.24-5.33h0c0-2.95,3.24-5.33,7.24-5.33h58.3c4,0,7.24,2.39,7.24,5.33h0Z"/>
+    <text class="j" transform="translate(159.74 99.25)"><tspan x="0" y="0">runPerChomSqlite_vcf</tspan></text>
+  </g>
+  <g>
+    <path class="s" d="M226.26,205.84c0,2.95-3.24,5.33-7.24,5.33h-57.35c-4,0-7.24-2.39-7.24-5.33h0c0-2.95,3.24-5.33,7.24-5.33h57.35c4,0,7.24,2.39,7.24,5.33h0Z"/>
+    <text class="j" transform="translate(159.74 207.59)"><tspan x="0" y="0">runPerChomSqlite_vcf</tspan></text>
+  </g>
+  <text class="i" transform="translate(213.81 131.76)"><tspan x="0" y="0">Extract two variant files</tspan><tspan x="0" y="7.2">in</tspan><tspan class="t" x="4.67" y="7.2"> </tspan><tspan x="6.23" y="7.2">TSV format</tspan></text>
+  <text class="i" transform="translate(191.81 189.68)"><tspan class="r" x="0" y="0">T</tspan><tspan x="3.33" y="0">wo separate runs with </tspan><tspan x="0" y="7.2">runPerChomSqlite</tspan></text>
+  <text class="i" transform="translate(189.81 218.09)"><tspan x="0" y="0">Combine results from two runs</tspan></text>
+  <g>
+    <rect class="e" x="151.5" y="147.31" width="30.93" height="17.71"/>
+    <text class="l" transform="translate(152.54 154.16) scale(1.07 1)"><tspan x="0" y="0">Individual </tspan><tspan class="w" x="1.06" y="7.2">V</tspan><tspan x="4.61" y="7.2">ariants1</tspan></text>
+  </g>
+  <g>
+    <rect class="e" x="200.48" y="147.31" width="30.93" height="17.71"/>
+    <text class="l" transform="translate(201.51 154.16) scale(1.07 1)"><tspan x="0" y="0">Individual </tspan><tspan class="w" x="1.06" y="7.2">V</tspan><tspan x="4.61" y="7.2">ariants2</tspan></text>
+  </g>
+  <text class="n" transform="translate(175.56 80.99)"><tspan class="v" x="0" y="0">Y</tspan><tspan x="3.45" y="0">es</tspan></text>
+  <text class="o" transform="translate(154.29 68.35)"><tspan x="0" y="0">Is the variant file a VCF file?</tspan></text>
+  <g>
+    <line class="b" x1="151.02" y1="70.88" x2="186.29" y2="90.16"/>
+    <polygon points="183.86 91.16 183.73 90.68 186.12 90.07 185.34 87.73 185.82 87.57 186.77 90.42 183.86 91.16"/>
+  </g>
+  <g>
+    <line class="b" x1="186.9" y1="125.49" x2="161.2" y2="144.7"/>
+    <polygon points="161.3 142.07 161.8 142.16 161.36 144.59 163.81 144.85 163.75 145.35 160.77 145.03 161.3 142.07"/>
+  </g>
+  <g>
+    <line class="b" x1="186.9" y1="125.49" x2="222.17" y2="144.77"/>
+    <polygon points="219.73 145.77 219.61 145.28 222 144.68 221.22 142.34 221.69 142.18 222.64 145.03 219.73 145.77"/>
+  </g>
+  <text class="m" transform="translate(166.97 181.92)"><tspan x="0" y="0">runPerChomSqlite</tspan></text>
+</svg>
