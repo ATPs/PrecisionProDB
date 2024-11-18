@@ -104,4 +104,21 @@ For the two examples above, if `-D Uniprot` is set, several more output files wi
 
 These files should be used for downstream analysis.
 
+### variant in string format
 
+```Python
+cd $PATH_OF_PRECISONPRODB
+
+python ./src/PrecisionProDB.py \
+        -m chr1-942451-T-C,1-6253878-C-T,1-2194700-C-G,1-1719406-G-A \
+        -o ./test_output/Ensembl/str/sqlite_two_step/Ensembl.str.sqlite_two_step \
+        -a Ensembl_GTF --PEFF -t 4 \
+        -S ./test_output/Ensembl/Ensembl.sqlite
+```
+two output will be generated
+
+* Ensembl.str.sqlite_two_step.pergeno.aa_mutations.csv
+* Ensembl.str.sqlite_two_step.pergeno.mutated_protein.fa
+
+Note:
+if variant is a string, the `-S` option is required.
