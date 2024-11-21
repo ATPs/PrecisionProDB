@@ -1,6 +1,6 @@
 # the following packages are used in testing. Lower versions should work.
-biopython == 1.81
-pandas == 2.2.2
-numpy == 1.26.4
-python == 3.10.14
+biopython==1.81
+pandas==2.2.2
+numpy==1.26.4
+python==3.10.14
 
