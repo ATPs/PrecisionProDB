@@ -109,6 +109,19 @@ git clone https://github.com/ATPs/PrecisionProDB.git
 
 To install other verisons, download from the [release page](https://github.com/ATPs/PrecisionProDB/releases) directly.
 
+We provided the running examples without install PrecisonProDB to `$PYTHONPATH`. However, if you would like to run it directly from the console, after change working directory to PrecisonProDB path, you may run (version after v2.0.0)
+
+```bash
+pip install -e .
+```
+It will create a precisionprodb.egg-link to `$PYTHONPATH` and you may run 
+```bash
+PrecisionProDB --help
+downloadHuman --help
+vcf2mutation --help
+```
+from the console directly. 
+
 ## run test files
 
 
