@@ -73,7 +73,7 @@ PrecisionProDB is tested under the `base` enviroment of [Anaconda](https://www.a
 If Anaconda is installed, only Biopython need to be installed:
 
 ```bash
-conda install -c anaconda biopython
+conda install -c conda-forge biopython
 ```
 
 Otherwise, it is recommended to use the [conda](https://github.com/conda/conda) to control the packages and [virtual environement](https://virtualenv.pypa.io/en/latest/). Install required packages:
