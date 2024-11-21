@@ -9,6 +9,8 @@ PrecisionProDB v2 has been developed to maintain compatibility with the previous
 
 With a pre-build sqlite file, it is very fast to check effect of variants in string format like `"chr1-942451-T-C,1-6253878-C-T,1-2194700-C-G,1-1719406-G-A"`.
 
+It is updated to support the [human Genome assembly T2T-CHM13v2.0](https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_009914755.1/) and its annotation in [RefSeq](https://ftp.ncbi.nlm.nih.gov/genomes/refseq/vertebrate_mammalian/Homo_sapiens/annotation_releases/current/GCF_009914755.1-RS_2024_08/).
+
 **[For more help information, visit the wiki page.](https://github.com/ATPs/PrecisionProDB/wiki)**
 
 **[For more running examples, visit the example folder](/examples/) and the [test_output folder](/test_output/).**
