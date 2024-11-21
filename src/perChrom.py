@@ -348,6 +348,7 @@ def get_df_transcript2(file_gtf, file_protein, file_genome, cpu_counts, datatype
             print('chromosome', chromosome, list(tdf_special.index), 'not translated from the CDS sequences in the genome. do not change')
             for transcript_id in tdf_special.index:
                 df_transcript2.at[transcript_id, 'mutations'] = []
+            df_transcript2 = df_transcript2[~df_transcript2.index.isin(set(tdf_special.index))]
     
     # split df_transcript2 to with mutations and no_mutations
     df_transcript_noMut = df_transcript2[df_transcript2['mutations'].apply(lambda x:len(x)==0)]

@@ -122,6 +122,8 @@ class PerChrom_sqlite(object):
 
         # get df_transcript2 based on dc_transcript2mutations
         protein_ids = tuple(dc_transcript2mutations.keys())
+        if len(protein_ids) == 1:
+            protein_ids = '("{}")'.format(protein_ids[0])
         query = f"SELECT * FROM protein_description WHERE protein_id IN {protein_ids}"
         df_transcript2 = pd.read_sql_query(query, self.con)        # assign mutations to each transcript. 
         if df_transcript2.shape[0] == 0:
@@ -145,6 +147,7 @@ class PerChrom_sqlite(object):
                 print('chromosome', chromosome, list(tdf_special.index), 'not translated from the CDS sequences in the genome. do not change')
                 for transcript_id in tdf_special.index:
                     df_transcript2.at[transcript_id, 'mutations'] = []
+                df_transcript2 = df_transcript2[~df_transcript2.index.isin(set(tdf_special.index))]
 
         df_transcript3 = df_transcript2
     
