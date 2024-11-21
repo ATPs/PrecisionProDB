@@ -615,7 +615,7 @@ class PerGeno(object):
 description = '''PrecisionProDB_core, personal proteogenomic tools which outputs a new reference protein based on the variants data
 '''
 
-if __name__ == '__main__':
+def main():
     import argparse
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('-g','--genome', help = 'the reference genome sequence in fasta format. It can be a gzip file', required=True)
@@ -655,3 +655,6 @@ if __name__ == '__main__':
     pergeno.splitInputByChromosomes()
     #print(pergeno.__dict__)
     pergeno.runPerChom()
+
+if __name__ == '__main__':
+    main()

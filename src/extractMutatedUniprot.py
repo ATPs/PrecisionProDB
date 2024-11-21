@@ -101,7 +101,7 @@ Output mutated proteins in files_alt.
 write three files, outprefix + '.uniprot_changed.tsv'/'.uniprot_changed.fa'/'.uniprot_all.fa'
 '''
 
-if __name__ == '__main__':
+def main():
     import argparse
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('-u','--files_uniprot', help = 'uniprot proteins. If more than one files, join by ","', required=True)
@@ -117,3 +117,5 @@ if __name__ == '__main__':
     outprefix = f.outprefix
     length_min = f.length_min
     extractMutatedUniprot(files_uniprot, files_ref, files_alt, outprefix, length_min = length_min)
+if __name__ == '__main__':
+    main()

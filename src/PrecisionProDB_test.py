@@ -79,7 +79,8 @@ def main(dc_variant, dc_inputs, dc_sqlite, output_test):
             f.write(f'{ls_cmd[i]}\n{result}\n\n')
 
 
-if __name__ == '__main__':
+
+def main():
     description = """
     Run PrecisionProDB tests.
     Usage: test.py -s PATH_OF_PRECISIONPRODB [-o OUTPUT_TEST]
@@ -158,7 +159,8 @@ if __name__ == '__main__':
     main(dc_variant, dc_inputs, dc_sqlite, output_test)
 
 
-
+if __name__ == '__main__':
+    main()
 
 
 

@@ -237,8 +237,7 @@ download the latest human gene models from RefSeq, GENCODE, Ensembl or UniProt t
 If datatype is "Uniprot", Ensembl and UniProt human sequences (UP000005640_9606, UP000005640_9606_additional) will be downloaded.
 If datatype is 'CHM13', the RefSeq CHM13 file will be downloaded
 '''
-
-if __name__ == '__main__':
+def main():
     import argparse
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('-d','--datatype', help = 'RefSeq, CHM13, GENCODE, Ensembl or Uniprot to download.', required=True)
@@ -249,3 +248,5 @@ if __name__ == '__main__':
     workfolder = f.out
     download(datatype=datatype, workfolder=workfolder)
 
+if __name__ == '__main__':
+    main()

@@ -407,7 +407,7 @@ description = '''PrecisionProDB_Sqlite, personal proteogenomic tools which outpu
 if datatype is gtf or not set, the gtf input is required
 '''
 
-if __name__ == '__main__':
+def main():
     import argparse
     parser = argparse.ArgumentParser(description=description)
     import argparse
@@ -448,3 +448,6 @@ if __name__ == '__main__':
     print(f)
 
     main(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite)
+
+if __name__ == '__main__':
+    main()

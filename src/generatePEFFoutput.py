@@ -218,7 +218,7 @@ def generateUniprotPEFFout(file_PEFF, files_uniprot_ref, file_uniprot_changed, f
 
 description = '''Generate PEFF output file based on amino acid substitutions annotated by PresionProDB and save a PEFF file
 '''
-if __name__ == '__main__':
+def main():
     import argparse
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('-p', '--protein', help='protein sequences in fasta format. It can be a gzip file.', required=True)
@@ -236,3 +236,6 @@ if __name__ == '__main__':
 
     if (f.uniprots is not None) and (f.changed is not None) and (f.outfile2 is not None):
         generateUniprotPEFFout(file_PEFF = f.outfile, files_uniprot_ref = f.uniprots, file_uniprot_changed = f.changed, file_uniprot_out = f.outfile2)
+
+if __name__ == '__main__':
+    main()

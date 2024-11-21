@@ -594,8 +594,7 @@ def get_proteins_from_sqlite(file_sqlite, file_output = None):
 
 
 description = '''create a sqlite file for PrecisionProDB.'''
-
-if __name__ == '__main__':
+def main():
     
     import argparse
     parser = argparse.ArgumentParser(description=description)
@@ -627,3 +626,6 @@ if __name__ == '__main__':
     )
     
     print('SQLite creation complete.')
+
+if __name__ == '__main__':
+    main()

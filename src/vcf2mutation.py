@@ -103,7 +103,8 @@ def getMutationsFromVCF(file_vcf, outprefix = None, individual=None, filter_PASS
 
 description = '''convert extract mutation information from vcf file
 '''
-if __name__ == '__main__':
+
+def main():
     import argparse
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('-i', '--file_vcf', help='input vcf file. It can be a gzip file', required=True)
@@ -120,3 +121,5 @@ if __name__ == '__main__':
     getMutationsFromVCF(file_vcf = f.file_vcf, outprefix = f.outprefix, individual=f.sample, filter_PASS = filter_PASS, chromosome_only = chromosome_only)
 
 
+if __name__ == '__main__':
+    main()

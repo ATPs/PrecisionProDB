@@ -135,7 +135,8 @@ def runPerGenoVCF(
 
 description = '''PrecisionProDB_vcf, personal proteogenomic tools which outputs a new reference protein based on the variants data. VCF file as the variant input
 '''
-if __name__ == '__main__':
+
+def main():
     import argparse
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('-g','--genome', help = 'the reference genome sequence in fasta format. It can be a gzip file', required=True)
@@ -182,3 +183,6 @@ if __name__ == '__main__':
         chromosome_only=chromosome_only, 
         keep_all=keep_all
         )
+
+if __name__ == '__main__':
+    main()

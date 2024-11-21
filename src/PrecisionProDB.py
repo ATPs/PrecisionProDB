@@ -12,7 +12,7 @@ PrecisionProDB, a personal proteogenomic tool which outputs a new reference prot
 A VCF or /a tsv file can be used as the variant input. If the variant file is in tsv format, at least four columns are required in the header: chr, pos, ref, alt. Additional columns will be ignored. Try to Convert the file to proper format if you have a bed file or other types of variant file. The pos column is 1-based like in the vcf file.
 Additionally, a string like "chr1-788418-CAG-C" can used as variant input. It has to be combined with the --sqlite for quick check of the mutation effects
 '''
-if __name__ == '__main__':
+def main():
     import argparse
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('-g','--genome', help = 'the reference genome sequence in fasta format. It can be a gzip file', default='')
@@ -173,3 +173,6 @@ if __name__ == '__main__':
 
 
     print('PrecisionProDB finished! Total seconds:', time.time() - time0)
+
+if __name__ == '__main__':
+    main()
