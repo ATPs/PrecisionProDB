@@ -124,8 +124,8 @@ from the console directly. Do not remove the PrecisionProDB folder after install
 
 Note:
 
-* the contents in folder `examples` and `test_output` were not included in the installation package.
-* If you want to test the with the examples or check more running examples and results, use `git clone https://github.com/ATPs/PrecisionProDB.git` or download from the link https://github.com/ATPs/PrecisionProDB/archive/refs/heads/master.zip directly.
+* the contents in folder `examples` and `test_output` were not included in the installation package from the [release page](https://github.com/ATPs/PrecisionProDB/releases).
+* If you want to test the with the examples or check more running examples and results, use `git clone https://github.com/ATPs/PrecisionProDB.git`.
 
 ## run test files
 
