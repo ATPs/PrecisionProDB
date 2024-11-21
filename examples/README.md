@@ -122,3 +122,24 @@ two output will be generated
 
 Note:
 if variant is a string, the `-S` option is required.
+
+## CHM13 T2T from RefSeq
+
+Since the data is in the same format like RefSeq, we tested the command below and it works perfectly.
+
+```Python
+cd $PATH_OF_PRECISONPRODB
+
+python ./src/downloadHuman.py -d CHM13 -o precisionprodb
+
+python ./src/PrecisionProDB.py \
+        -g precisionprodb/GCF_009914755.1_T2T-CHM13v2.0_genomic.fna.gz \
+        -p precisionprodb/GCF_009914755.1_T2T-CHM13v2.0_protein.faa.gz \
+        -t 12 \
+        -a RefSeq \
+        -f precisionprodb/GCF_009914755.1_T2T-CHM13v2.0_genomic.gtf.gz \
+        -m precisionprodb/Jurkat.CHM13.RefSeq.vcf.gz \
+        -o precisionprodb/Jurkat.CHM13.RefSeq.PrecisonProDB \
+        -S precisionprodb/GCF_009914755.1_T2T-CHM13v2.0.sqlite
+```
+
