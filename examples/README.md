@@ -143,3 +143,37 @@ python ./src/PrecisionProDB.py \
         -S precisionprodb/GCF_009914755.1_T2T-CHM13v2.0.sqlite
 ```
 
+# vcf2mutation
+to get tsv file from the vcf file, you can use the vcf2mutation.py script
+```
+cd $PATH_OF_PRECISONPRODB
+python ./src/vcf2mutation.py -h
+
+usage: vcf2mutation [-h] -i FILE_VCF [-o OUTPREFIX] [-s SAMPLE]
+                    [-F] [-A]
+
+convert extract mutation information from vcf file
+
+options:
+  -h, --help            show this help message and exit
+  -i FILE_VCF, --file_vcf FILE_VCF
+                        input vcf file. It can be a gzip file
+  -o OUTPREFIX, --outprefix OUTPREFIX
+                        output prefix to store the two output
+                        dataframes, default: None, do not write
+                        the result to files. file will be
+                        outprefix_1/2.tsv
+  -s SAMPLE, --sample SAMPLE
+                        sample name in the vcf to extract the
+                        variant information. default: None,
+                        extract the first sample
+  -F, --no_filter       default only keep variant with value
+                        "PASS" FILTER column of vcf file. if
+                        set, do not filter
+  -A, --all_chromosomes
+                        default keep variant in chromosomes and
+                        ignore those in short fragments of the
+                        genome. if set, use all chromosomes
+                        including fragments
+
+```
