@@ -62,9 +62,9 @@ def getRefSeqLatest():
 
         files_latest = ftp.nlst(folder_release)
 
-        ls_url_genome += ['ftp://' + ftp_url + e for e in files_latest if re.findall(f'/.*_genomic.fna.gz',e)]
-        ls_url_GTF += ['ftp://' + ftp_url + e for e in files_latest if re.findall(f'/.*_genomic.gtf.gz',e)]
-        ls_url_protein += ['ftp://' + ftp_url + e for e in files_latest if re.findall(f'/.*_protein.faa.gz',e)]
+        ls_url_genome += ['https://' + ftp_url + e for e in files_latest if re.findall(f'/.*_genomic.fna.gz',e)]
+        ls_url_GTF += ['https://' + ftp_url + e for e in files_latest if re.findall(f'/.*_genomic.gtf.gz',e)]
+        ls_url_protein += ['https://' + ftp_url + e for e in files_latest if re.findall(f'/.*_protein.faa.gz',e)]
 
     url_genome = [i for i in ls_url_genome if 'T2T-CHM13' not in i and 'cds_' not in i and 'rna_' not in i][0]
     url_GTF = [i for i in ls_url_GTF if 'T2T-CHM13' not in i][0]
@@ -99,9 +99,9 @@ def getRefSeqLatestCHM13():
 
         files_latest = ftp.nlst(folder_release)
 
-        ls_url_genome += ['ftp://' + ftp_url + e for e in files_latest if re.findall(f'/.*_genomic.fna.gz',e)]
-        ls_url_GTF += ['ftp://' + ftp_url + e for e in files_latest if re.findall(f'/.*_genomic.gtf.gz',e)]
-        ls_url_protein += ['ftp://' + ftp_url + e for e in files_latest if re.findall(f'/.*_protein.faa.gz',e)]
+        ls_url_genome += ['https://' + ftp_url + e for e in files_latest if re.findall(f'/.*_genomic.fna.gz',e)]
+        ls_url_GTF += ['https://' + ftp_url + e for e in files_latest if re.findall(f'/.*_genomic.gtf.gz',e)]
+        ls_url_protein += ['https://' + ftp_url + e for e in files_latest if re.findall(f'/.*_protein.faa.gz',e)]
 
     url_genome = [i for i in ls_url_genome if 'T2T-CHM13' in i and 'cds_' not in i and 'rna_' not in i][0]
     url_GTF = [i for i in ls_url_GTF if 'T2T-CHM13' in i][0]
