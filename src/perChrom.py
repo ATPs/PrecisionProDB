@@ -691,7 +691,7 @@ def save_mutation_and_proteins(df_transcript3, outprefix):
     outfilename = outprefix +'.aa_mutations.csv'
     if not os.path.exists(os.path.dirname(outfilename)):
         os.makedirs(os.path.dirname(outfilename))
-    df_sum_mutations.to_csv(outfilename, sep='\t')
+    df_sum_mutations.to_csv(outfilename, sep='\t',index=None)
     print('number of proteins with AA change:', df_sum_mutations.shape[0])
     
     # save proteins
