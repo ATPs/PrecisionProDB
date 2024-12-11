@@ -144,7 +144,7 @@ def main():
         # use Sqlite
         import PrecisionProDB_Sqlite
         print('using sqlite database to speed up')
-        PrecisionProDB_Sqlite.main(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite)
+        PrecisionProDB_Sqlite.main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite)
 
     pattern = re.compile(r'(chr)?(\d+)-(\d+)-([A-Za-z]+)-([A-Za-z]+)')
     match = pattern.match(file_mutations)

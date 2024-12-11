@@ -305,7 +305,7 @@ def check_sqlite_file(file_path):
         if 'conn' in locals():
             conn.close()
             
-def main(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite):
+def main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite):
 
     if os.path.exists(file_sqlite):
         if not check_sqlite_file(file_sqlite):
