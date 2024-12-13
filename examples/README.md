@@ -7,8 +7,10 @@
 For more larger files, users may find tsv files based on gnomAD 3.1 data from  
 https://github.com/ATPs/PrecisionProDB_references/tree/main/gnomAD3.1
 
-A bigger VCF file from Jurkat cellline can be found  
+A bigger VCF file from Jurkat cellline (including the one with T2T CHM13 as reference genome) can be found  
 https://github.com/ATPs/PrecisionProDB_references/tree/main/cellline
+
+[Jurkat.CHM13.RefSeq.vcf.gz](https://github.com/ATPs/PrecisionProDB_references/blob/main/cellline/Jurkat.CHM13.RefSeq.vcf.gz)
 
 ## Run with only local files
 
