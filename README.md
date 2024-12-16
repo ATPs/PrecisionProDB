@@ -57,6 +57,7 @@ Main features:
     * `ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/reference_proteomes/Eukaryota/`
     * The files are `UP000005640/UP000005640_9606.fasta.gz` and `UP000005640/UP000005640_9606_additional.fasta.gz`, which may change in the future.
 * The non-standard codons and rare amino acids (e.g. Selenocysteine (**Sec** or **U**)) in the human genome can be properly incorporated.
+* PrecisionProDB stands out by utilizing the codons derived directly from the input protein FASTA sequences, rather than relying on standard or reference codon sets. We believe that gene annotation sources such as GENCODE, RefSeq, and other genomic databases use non-standard codons for a reason—reflecting unique biological contexts and potentially crucial variations. By preserving these non-standard codons in our analysis, PrecisionProDB offers a more accurate, context-sensitive interpretation of protein sequences, ensuring that the nuances of the original data are maintained for more reliable downstream applications.
 * Internal stops (*) in proteins were reserved.
 * Supports variant file in text or VCF format.
 * All input files can be in compressed gzip (.gz) format.
