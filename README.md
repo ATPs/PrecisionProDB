@@ -15,6 +15,9 @@ It is updated to support the [human Genome assembly T2T-CHM13v2.0](https://www.n
 
 **[For more running examples, visit the example folder](/examples/) and the [test_output folder](/test_output/).**
 
+# [PrecisionProDB online](https://precisionprodb.genes.fun/)
+PrecisionProDB is [now available here](https://precisionprodb.genes.fun/) for faster checking of effect of variants in protein sequences. Users may also upload a small tsv/tsv.gz file to use the pre-defined gene models.
+
 # Table of Contents
 
 - [Description](#description)
