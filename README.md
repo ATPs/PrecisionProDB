@@ -293,6 +293,9 @@ python Path_of_PrecisionProDB/src/PrecisionProDB.py -h
 
 [The printed message were provided on the wiki page, where further explanations can be found.](https://github.com/ATPs/PrecisionProDB/wiki/PrecisionProDB-parameters)
 
+Notes:
+
+* If the chromosome name in gtf file and mutation file is different, `-a RefSeq` is needed to do a match, and the `-k` need to be adjusted, to match the name in the protein file and in the gtf file. For [ORFanage](https://www.nature.com/articles/s43588-023-00496-1) translation with RefSeq-CHM13 model with mutations with chromosme "chr" in the mutation file, the parameter should be like `-a RefSeq -k transcript_id`
 
 # Outputs 
 
