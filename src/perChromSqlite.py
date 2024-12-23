@@ -184,7 +184,7 @@ def main():
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('-q', '--sqlite', help='sqlite file file with CDS and exon annotations', required=True)
     parser.add_argument('-m', '--mutations', help='a file stores the variants, or a string looks like "1-55051215-G-GA" or "chr1-55051215-G-GA" ', required=True)
-    parser.add_argument('-t', '--threads', help='number of threads/CPUs to run the program. default, use all CPUs available', type=int, default=os.cpu_count())
+    parser.add_argument('-t', '--threads', help='number of threads/CPUs to run the program. default, use all CPUs available', type=int, default=min(20, os.cpu_count()))
     parser.add_argument('-o', '--out', help='output prefix. two file will be output. One is the annotation for mutated transcripts, one is the protein sequences. {out}.aa_mutations.csv, {out}.mutated_protein.fa. default "perChrom" ', default = "perChrom")
     parser.add_argument('-c', '--chromosome', help='''chromosome name/id, default="chr1" ''', default='chr1', type=str)
     parser.add_argument('-a', '--datatype', help='''input datatype, could be GENCODE_GTF, GENCODE_GFF3, RefSeq, Ensembl_GTF or gtf. default "gtf". Ensembl_GFF3 is not supported. ''', default='gtf', type=str, choices=['GENCODE_GTF', 'GENCODE_GFF3','RefSeq','Ensembl_GTF','gtf'])

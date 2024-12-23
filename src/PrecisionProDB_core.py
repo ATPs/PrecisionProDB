@@ -89,7 +89,7 @@ class PerGeno(object):
                     file_gtf,
                     file_mutations,
                     file_protein,
-                    threads = os.cpu_count(),
+                    threads = min(20, os.cpu_count()),
                     outprefix = 'perGeno',
                     datatype = 'gtf',
                     protein_keyword = 'auto',
@@ -622,7 +622,7 @@ def main():
     parser.add_argument('-f', '--gtf', help='gtf file with CDS and exon annotations. It can be a gzip file', required=True)
     parser.add_argument('-m', '--mutations', help='a file stores the variants', required=True)
     parser.add_argument('-p','--protein', help = 'protein sequences in fasta format. It can be a gzip file. Only proteins in this file will be checked', required=True)
-    parser.add_argument('-t', '--threads', help='number of threads/CPUs to run the program. default, use all CPUs available', type=int, default=os.cpu_count())
+    parser.add_argument('-t', '--threads', help='number of threads/CPUs to run the program. default, use all CPUs available', type=int, default=min(20, os.cpu_count()))
     parser.add_argument('-o', '--out', help='''output prefix. Three files will be saved, including the annotation for mutated transcripts, the mutated or all protein sequences. {out}.pergeno.aa_mutations.csv, {out}.pergeno.protein_all.fa, {out}.protein_changed.fa. default "perGeno" ''', default="perGeno")
     parser.add_argument('-a', '--datatype', help='''input datatype, could be GENCODE_GTF, GENCODE_GFF3, RefSeq, Ensembl_GTF or gtf. default "gtf". Ensembl_GFF3 is not supported. ''', default='gtf', type=str, choices=['GENCODE_GTF', 'GENCODE_GFF3','RefSeq','Ensembl_GTF','gtf'])
     parser.add_argument('-k','--protein_keyword', help='''field name in attribute column of gtf file to determine ids for proteins. default "auto", determine the protein_keyword based on datatype. "transcript_id" for GENCODE_GTF, "protein_id" for "RefSeq" and "Parent" for gtf and GENCODE_GFF3 ''', default='auto')

@@ -606,7 +606,7 @@ def main():
     parser.add_argument('-a', '--datatype', help='''input datatype, could be GENCODE_GTF, GENCODE_GFF3, RefSeq, Ensembl_GTF or gtf. default "gtf". Ensembl_GFF3 is not supported. ''', default='gtf', type=str, choices=['GENCODE_GTF', 'GENCODE_GFF3','RefSeq','Ensembl_GTF','gtf'])
     parser.add_argument('-k', '--protein_keyword', help='field name in attribute column of gtf file to determine ids for proteins. default "auto", determine the protein_keyword based on datatype. "transcript_id" for GENCODE_GTF, "protein_id" for "RefSeq" and "Parent" for gtf and GENCODE_GFF3', default='auto')
     parser.add_argument('--keep_all', help='If set, do not delete files generated during the run', action='store_true')
-    parser.add_argument('-t', '--threads', help='number of threads/CPUs to run the program. default, use all CPUs available', type=int, default=os.cpu_count())
+    parser.add_argument('-t', '--threads', help='number of threads/CPUs to run the program. default, use all CPUs available', type=int, default=min(20, os.cpu_count()))
     if TEST:
         args = parser.parse_args(['-q', file_sqlite, '-g', file_genome, '-p', file_protein, '-f', file_gtf, '-o', outprefix, '-a', 'GENCODE_GTF', '-k', protein_keyword, '--keep_all', str(keep_all)])
 
