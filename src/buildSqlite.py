@@ -455,10 +455,13 @@ def get_protein_id_from_genomicLocs(con, chromosome, pos, pos_end=None, threads=
             query = f'SELECT * FROM "{table_name}"'
             tdf = pd.read_sql_query(query, con)
             tdf = tdf.sort_values(by=['genomicLocs_start', 'genomicLocs_end'])
-            pool = Pool(threads)
-            ls_results = pool.starmap(get_protein_ids_from_tdf, [[tdf, pos, pos_end] for pos, pos_end in dc_params[a_chromosome]])
-            pool.close()
-            pool.join()
+            if threads > 1:
+                pool = Pool(threads)
+                ls_results = pool.starmap(get_protein_ids_from_tdf, [[tdf, pos, pos_end] for pos, pos_end in dc_params[a_chromosome]])
+                pool.close()
+                pool.join()
+            else:
+                ls_results = [get_protein_ids_from_tdf(tdf, pos, pos_end) for pos, pos_end in dc_params[a_chromosome]]
             for i,j in zip(dc_params[a_chromosome], ls_results):
                 dc_results[(a_chromosome, i[0], i[1])] = j
         
