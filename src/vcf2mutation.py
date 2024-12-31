@@ -97,6 +97,7 @@ def getMutationsFromVCF(file_vcf, outprefix = None, individual=None, filter_PASS
         fout2 = outprefix + '_2.tsv'
         df1.to_csv(fout1, sep='\t', index=None)
         df2.to_csv(fout2, sep='\t', index=None)
+        return [fout1, fout2]
 
     return df1, df2
 
