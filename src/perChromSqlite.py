@@ -155,11 +155,13 @@ class PerChrom_sqlite(object):
             print('No protein sequences to change for chromosome', chromosome)
             return df_transcript3
 
-
-        pool = Pool(cpu_counts)
-        results = pool.starmap(perChrom.translateCDSplusWithMut2, [[r, df_mutations] for _,r in df_transcript3.iterrows()])
-        pool.close()
-        pool.join()
+        if cpu_count > 1:
+            pool = Pool(cpu_counts)
+            results = pool.starmap(perChrom.translateCDSplusWithMut2, [[r, df_mutations] for _,r in df_transcript3.iterrows()])
+            pool.close()
+            pool.join()
+        else:
+            results = [perChrom.translateCDSplusWithMut2(r, df_mutations) for _,r in df_transcript3.iterrows()]
         tdf = pd.DataFrame(results)
         for col in tdf.columns:
             df_transcript3[col] = list(tdf[col])
