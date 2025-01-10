@@ -17,6 +17,8 @@ def readProtein2DF(filename):
     '''given a fasta file, return a dataframe with seq_id, seq_anno, and seq
     '''
     ls = list(SeqIO.parse(openFile(filename),'fasta'))
+    if len(ls) == 0:
+        return pd.DataFrame()
     tdf = pd.DataFrame()
     tdf['seq_id'] = [e.id for e in ls]
     tdf['seq_anno'] = [e.description for e in ls]
@@ -79,8 +81,14 @@ def runPerGenoVCF(
     fout_mutations_1 = outprefix_1 + '.pergeno.aa_mutations.csv'
     fout_mutations_2 = outprefix_2 + '.pergeno.aa_mutations.csv'
     fout_mutations = outprefix + '.pergeno.aa_mutations.csv'
-    df_mutations_1 = pd.read_csv(fout_mutations_1, sep='\t')
-    df_mutations_2 = pd.read_csv(fout_mutations_2, sep='\t')
+    try:
+        df_mutations_1 = pd.read_csv(fout_mutations_1, sep='\t')
+    except:
+        df_mutations_1 = pd.DataFrame()
+    try:
+        df_mutations_2 = pd.read_csv(fout_mutations_2, sep='\t')
+    except:
+        df_mutations_2 = pd.DataFrame()
     df_mutations_1['batch'] = '1'
     df_mutations_2['batch'] = '2'
     df_mutations = pd.concat([df_mutations_1, df_mutations_2], ignore_index=True)
