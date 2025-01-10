@@ -76,7 +76,10 @@ def runPerGenoVCF(
     df_seqs_changed_1['batch'] = '1'
     df_seqs_changed_2['batch'] = '2'
     df_seqs_changed = pd.concat([df_seqs_changed_1,df_seqs_changed_2], ignore_index=True)
-
+    if df_seqs_changed.shape[0] == 0:
+        print('no mutated proteins predicted. Will stop here. You may need to clean the intermediate files!')
+        return None
+    
     # read in the mutation files
     fout_mutations_1 = outprefix_1 + '.pergeno.aa_mutations.csv'
     fout_mutations_2 = outprefix_2 + '.pergeno.aa_mutations.csv'
@@ -92,6 +95,9 @@ def runPerGenoVCF(
     df_mutations_1['batch'] = '1'
     df_mutations_2['batch'] = '2'
     df_mutations = pd.concat([df_mutations_1, df_mutations_2], ignore_index=True)
+    if df_mutations.shape[0] == 0:
+        print('nno mutated proteins predicted. Will stop here. You may need to clean the intermediate files!')
+        return None
 
     # join the mutation and protein file
     df_joined = df_seqs_changed.merge(df_mutations, left_on = ['seq_id','batch'], right_on = ['protein_id_fasta','batch'])
