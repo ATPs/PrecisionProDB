@@ -77,6 +77,46 @@ def parseGtfAttributes(anno):
     
     return tdc
 
+def split_complex_variant(ls_to_write):
+    '''
+    ls_to_write = [chromosome, position, reference, alternative, '\t'.join(str(e) for e in ls_alternatives)]
+    or ls_to_write = [chromosome, position, reference, alternative]
+    deal with complex variants. usually it should be like chr1-111-A-T, chr1-111-AT-A, chr1-111-A-AT. but some times, it could be like chr1-111-GG-TT
+    '''
+    chromosome, position, reference, alternative = ls_to_write[:4]
+    position = int(position)
+    ls = []
+    n = min(len(reference), len(alternative))
+    for i in range(n-1):
+        ref = reference[i]
+        alt = alternative[i]
+        if ref != alt:
+            ls.append([chromosome, position + i, ref, alt] + ls_to_write[4:])
+    ref = reference[n-1:]
+    alt = alternative[n-1:]
+    ls.append([chromosome, position + n-1, ref, alt] + ls_to_write[4:])
+    return ls
+
+def readComplexTsvMutationFile(file_mutations):
+    '''dealing with variants that both ref and alt is longer than 1, like
+    chr1-111-GG-TT
+    '''
+    df_mutations = pd.read_csv(file_mutations, sep='\t',low_memory=False)
+    columns_required = ['chr', 'pos', 'ref', 'alt']
+    columns_ordered = columns_required + [i for i in df_mutations.columns if i not in columns_required]
+    df_mutations = df_mutations[columns_ordered]
+    df_mut_abnormal = df_mutations[df_mutations['ref'].str.len().gt(1) & df_mutations['alt'].str.len().gt(1)].copy()
+    
+    if df_mut_abnormal.shape[0] == 0:
+        return df_mutations
+    
+    print(df_mut_abnormal.shape[0], 'lines in mutation file both ref and alt are longer than 1')
+    df_mut_normal = df_mutations[df_mutations['ref'].str.len().eq(1) | df_mutations['alt'].str.len().eq(1)]
+    ls_alternatives = df_mut_abnormal.values.tolist()
+    df_mut_abnormal_new = pd.DataFrame([i  for j in ls_alternatives for i in split_complex_variant(j)], columns=columns_ordered)
+    df_mutations = pd.concat([df_mut_normal, df_mut_abnormal_new], ignore_index=True)
+    return df_mutations
+
 
 class PerGeno(object):
     """
@@ -335,7 +375,7 @@ class PerGeno(object):
         if chromosomes_genome_description is None:
             chromosomes_genome_description = self.chromosomes_genome_description
 
-        df_mutations = pd.read_csv(file_mutations, sep='\t',low_memory=False)
+        df_mutations = readComplexTsvMutationFile(file_mutations)
         df_mutations['chr'] = df_mutations['chr'].astype(str)
         chromosomes_mutation = []
         
