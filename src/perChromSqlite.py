@@ -50,8 +50,13 @@ def is_valid(value):
     Returns:
     bool: True if the value is valid, False otherwise.
     """
-    if pd.isna(value) or value in [None, '', 0, '0', []]:
+    if pd.isna(value) or value in [None, '', 0, '0', [], 'False', False, '.', 'NaN', '*', 'N/A', 'NA', 'nan', 'null', 'Null', 'NULL', 'None', 'none','-', ' ', '[]']:
         return False
+
+    if value in [1, '1', True, 'True', 2, '2', 3, '3', 4, '4', 5, '5', 6, '6', 7, '7', 8, '8', 9, '9']:
+        return True
+
+    print('warning: unexpected value:', value, 'in mutation file. use as True with causion!')
     return True
 
 
@@ -109,10 +114,15 @@ def convert_df_transcript2_to_df_transcript3(df_transcript2, df_mutations, indiv
     individual is a list of samples in df_mutations
     
     '''
-    if individual is None or individual == '' or individual == 'None' or individual == []:
+    if individual is None or individual == '' or individual == 'None' or individual == [] or individual == 'ALL_VARIANTS':
         return df_transcript2
     
-    if ',' in individual:
+    if isinstance(individual, list):
+        individual = individual
+    elif individual == 'ALL_SAMPLES':
+        individual = [i for i in df_mutations.columns if i not in ['chr', 'pos', '', 'ref', 'alt', 'pos_end']]
+        print('warning: individual is ALL_SAMPLES, all columns in file_muations other than chr pos ref alt were used as individuals, which may cause problem. individuals were set as:', individual)
+    elif ',' in individual:
         individual = individual.split(',')
     else:
         individual = [individual]
@@ -148,7 +158,7 @@ def save_mutation_and_proteins(df_transcript3, outprefix):
     df_sum_mutations = df_transcript3[(df_transcript3['AA_seq'] != df_transcript3['new_AA']) & (pd.notnull(df_transcript3['new_AA']))][columns_keep]
     
     df_sum_mutations = df_sum_mutations.reset_index()
-    df_sum_mutations = df_sum_mutations.groupby([i for i in df_sum_mutations.columns if i != 'individual'])['individual'].apply(lambda x:','.join(x)).reset_index()
+    df_sum_mutations = df_sum_mutations.groupby([i for i in df_sum_mutations.columns if i != 'individual'] ,dropna=False)['individual'].apply(lambda x:','.join(x)).reset_index()
     df_sum_mutations['protein_id_fasta_nth'] = df_sum_mutations.groupby('protein_id_fasta').cumcount()+1
     df_sum_mutations['protein_id_fasta'] = df_sum_mutations.apply(lambda x: '{}__{}'.format(x['protein_id_fasta'], x['protein_id_fasta_nth']), axis=1)
     outfilename = outprefix +'.aa_mutations.csv'
@@ -274,7 +284,7 @@ class PerChrom_sqlite(object):
             df_transcript3['len_alt_AA'] = df_transcript3['new_AA'].str.len()
         
         if save_results:
-            if individual is None or individual == '' or individual == 'None' or individual == []:
+            if individual is None or individual == '' or individual == 'None' or individual == [] or individual == 'ALL_VARIANTS':
                 perChrom.save_mutation_and_proteins(df_transcript3, outprefix)
             else:
                 save_mutation_and_proteins(df_transcript3, outprefix)
