@@ -203,9 +203,12 @@ def convertVCF2MutationComlex(file_vcf, outprefix = None, individual="ALL_SAMPLE
             individual_col = [columns.index(indi) for indi in individual]
         
         column_names = ['chr', 'pos', 'ref', 'alt']
+        column_for_samples = []
         for indi in individual_col:
-            column_names.append(columns[indi] + '__1')
-            column_names.append(columns[indi] + '__2')
+            column_for_samples.append(columns[indi] + '__1')
+            column_for_samples.append(columns[indi] + '__2')
+        
+        column_names = column_names + column_for_samples
         
         if write_header:
             fout.write('\t'.join(column_names) + '\n')
@@ -261,7 +264,7 @@ def convertVCF2MutationComlex(file_vcf, outprefix = None, individual="ALL_SAMPLE
                 fout.write(new_line)
         
     fout.close()
-    return None
+    return column_for_samples
 
 description = '''convert extract mutation information from vcf file
 If --sample is not set or only one sample were used, the same as PrecisionProDB version 1.0. two files will be generated.
