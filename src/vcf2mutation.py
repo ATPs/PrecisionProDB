@@ -163,7 +163,7 @@ def convertVCF2MutationComlex(file_vcf, outprefix = None, individual="ALL_SAMPLE
         files_vcf = glob.glob(file_vcf)
         if len(files_vcf) == 0:
             print(file_vcf, 'not found.')
-            return None
+            return []
     
     if outprefix is None:
         file_output = file_vcf + '.tsv'
