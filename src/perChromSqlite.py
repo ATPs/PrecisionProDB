@@ -162,7 +162,7 @@ def save_mutation_and_proteins(df_transcript3, outprefix):
     fout = open(outprefix + '.mutated_protein.fa','w')
     for protein_id, r in df_sum_mutations.iterrows():
         if pd.notnull(r['new_AA']) and r['new_AA'] != r['AA_seq']:
-            fout.write('>{}\tchanged\n{}\n'.format(r['protein_id_fasta_nth'], r['new_AA']))
+            fout.write('>{}\tchanged\n{}\n'.format(r['protein_id_fasta'], r['new_AA']))
     fout.close()
 
 class PerChrom_sqlite(object):
@@ -274,7 +274,7 @@ class PerChrom_sqlite(object):
             df_transcript3['len_alt_AA'] = df_transcript3['new_AA'].str.len()
         
         if save_results:
-            if if individual is None or individual == '' or individual == 'None' or individual == []:
+            if individual is None or individual == '' or individual == 'None' or individual == []:
                 perChrom.save_mutation_and_proteins(df_transcript3, outprefix)
             else:
                 save_mutation_and_proteins(df_transcript3, outprefix)
