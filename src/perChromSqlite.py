@@ -40,6 +40,21 @@ if TEST:
 #     protein_ids = buildSqlite.get_protein_id_from_genomicLocs(con, chromosome, pos)
 #     return [row.name, protein_ids]
 
+def is_valid(value):
+    """
+    Check if a value is not None, '', 0, '0', pd.NaT, pd.NaN, or np.nan.
+    
+    Parameters:
+    value: The value to check.
+    
+    Returns:
+    bool: True if the value is valid, False otherwise.
+    """
+    if pd.isna(value) or value in [None, '', 0, '0', []]:
+        return False
+    return True
+
+
 def get_protein_id_from_df_mutations(df_mutations, file_sqlite, cpu_counts=10):
     '''
     get protein_id from df_mutations
@@ -65,6 +80,90 @@ def get_protein_id_from_df_mutations(df_mutations, file_sqlite, cpu_counts=10):
     
     return combined_results
 
+def convert_df_transcript2_to_df_transcript3_helper(protein_id, df_transcript2, df_mutations, individual):
+    '''
+    protein_id is a protein_id in df_transcript2
+    '''
+    mutations = df_transcript2.loc[protein_id]['mutations']
+    tdf_m = df_mutations.loc[mutations]
+    tdc = {}
+    for sample in individual:
+        if sample not in tdf_m.columns:
+            print('warning:', sample, 'not in mutation columns and is ignored! unexpected error may happen!')
+            continue
+        tdf_m_single = tdf_m[tdf_m[sample].apply(is_valid)]
+        variant_index = tuple(tdf_m_single.index)
+        if len(variant_index) > 0:
+            if variant_index not in tdc:
+                tdc[variant_index] = []
+            tdc[variant_index].append(sample)
+    
+    tdc = {k:','.join(v) for k,v in tdc.items()}
+    return list(tdc.items())
+
+def convert_df_transcript2_to_df_transcript3(df_transcript2, df_mutations, individual = None, cpu_counts=1):
+    '''
+    convert df_transcript2 to df_transcript3
+    if individual is None or individual is '', return df_transcript2
+    else, group mutations in df_transcript2 by individual. rename index by adding __X, and add column 'individual'
+    individual is a list of samples in df_mutations
+    
+    '''
+    if individual is None or individual == '' or individual == 'None' or individual == []:
+        return df_transcript2
+    
+    if ',' in individual:
+        individual = individual.split(',')
+    else:
+        individual = [individual]
+    
+    if cpu_counts == 1:
+        results = [convert_df_transcript2_to_df_transcript3_helper(protein_id, df_transcript2, df_mutations, individual) for protein_id in df_transcript2.index]
+    else:
+        pool = Pool(cpu_counts)
+        results = pool.starmap(convert_df_transcript2_to_df_transcript3_helper, [(protein_id, df_transcript2, df_mutations, individual) for protein_id in df_transcript2.index])
+        pool.close()
+        pool.join()
+    
+    df_transcript3 = df_transcript2.copy()
+    df_transcript3['mutations_anno'] = results
+    df_transcript3 = df_transcript3.explode('mutations_anno')
+    df_transcript3['mutations'] = df_transcript3['mutations_anno'].str[0]
+    df_transcript3['individual'] = df_transcript3['mutations_anno'].str[1]
+    df_transcript3 = df_transcript3.drop('mutations_anno', axis=1)
+    df_transcript3 = df_transcript3[df_transcript3['individual'].apply(is_valid)]
+    df_transcript3['mutations'] = df_transcript3['mutations'].apply(list)
+    return df_transcript3
+
+def save_mutation_and_proteins(df_transcript3, outprefix):
+    '''
+    save results based on outprefix
+    '''
+    # save mutation annotation
+    columns_keep = ['protein_id_fasta', 'seqname', 'strand','frameChange','stopGain', 'AA_stopGain', 'stopLoss', 'stopLoss_pos', 'nonStandardStopCodon', 'n_variant_AA', 'n_deletion_AA', 'n_insertion_AA', 'variant_AA', 'insertion_AA', 'deletion_AA', 'len_ref_AA', 'len_alt_AA','individual','new_AA','AA_seq']
+    columns_keep = [e for e in columns_keep if e in df_transcript3.columns]
+    if df_transcript3.shape[0] == 0:
+        print('no protein with AA change')
+        return None
+    df_sum_mutations = df_transcript3[(df_transcript3['AA_seq'] != df_transcript3['new_AA']) & (pd.notnull(df_transcript3['new_AA']))][columns_keep]
+    
+    df_sum_mutations = df_sum_mutations.reset_index()
+    df_sum_mutations = df_sum_mutations.groupby([i for i in df_sum_mutations.columns if i != 'individual'])['individual'].apply(lambda x:','.join(x)).reset_index()
+    df_sum_mutations['protein_id_fasta_nth'] = df_sum_mutations.groupby('protein_id_fasta').cumcount()+1
+    df_sum_mutations['protein_id_fasta'] = df_sum_mutations.apply(lambda x: '{}__{}'.format(x['protein_id_fasta'], x['protein_id_fasta_nth']), axis=1)
+    outfilename = outprefix +'.aa_mutations.csv'
+    if not os.path.exists(os.path.dirname(outfilename)):
+        os.makedirs(os.path.dirname(outfilename))
+    df_sum_mutations[[i for i in df_sum_mutations.columns if i not in ['new_AA','AA_seq', 'protein_id_fasta_nth']]].to_csv(outfilename, sep='\t',index=None)
+    print('{} proteins with AA change and generated {} mutated proteins'.format(df_sum_mutations['protein_id'].nunique(), df_sum_mutations['protein_id_fasta'].nunique()))
+    
+    
+    # save proteins
+    fout = open(outprefix + '.mutated_protein.fa','w')
+    for protein_id, r in df_sum_mutations.iterrows():
+        if pd.notnull(r['new_AA']) and r['new_AA'] != r['AA_seq']:
+            fout.write('>{}\tchanged\n{}\n'.format(r['protein_id_fasta_nth'], r['new_AA']))
+    fout.close()
 
 class PerChrom_sqlite(object):
     """
@@ -78,7 +177,8 @@ class PerChrom_sqlite(object):
                     threads,
                     outprefix,
                     datatype,
-                    chromosome
+                    chromosome,
+                    individual = None
                 ):
         self.file_sqlite = file_sqlite # genome file location
         self.file_mutations = file_mutations # mutation file location
@@ -86,6 +186,7 @@ class PerChrom_sqlite(object):
         self.outprefix = outprefix # where to store the results
         self.datatype = datatype # input datatype, could be GENCODE_GTF, GENCODE_GFF3, RefSeq or gtf
         self.chromosome = chromosome # chromosome name
+        self.individual = individual # individual name
         
         # dataframe to store the mutation information
         # global df_mutations
@@ -115,6 +216,7 @@ class PerChrom_sqlite(object):
         outprefix = self.outprefix
         chromosome = self.chromosome
         df_mutations = self.df_mutations
+        individual = self.individual
         # global con
 
         # get transcripts that will be used based on the self_mutations
@@ -149,13 +251,13 @@ class PerChrom_sqlite(object):
                     df_transcript2.at[transcript_id, 'mutations'] = []
                 df_transcript2 = df_transcript2[~df_transcript2.index.isin(set(tdf_special.index))]
 
-        df_transcript3 = df_transcript2
+        df_transcript3 = convert_df_transcript2_to_df_transcript3(df_transcript2, df_mutations, individual = individual, cpu_counts=cpu_counts)
     
         if df_transcript3.shape[0] == 0:
             print('No protein sequences to change for chromosome', chromosome)
             return df_transcript3
 
-        if cpu_count > 1:
+        if cpu_counts > 1:
             pool = Pool(cpu_counts)
             results = pool.starmap(perChrom.translateCDSplusWithMut2, [[r, df_mutations] for _,r in df_transcript3.iterrows()])
             pool.close()
@@ -172,7 +274,10 @@ class PerChrom_sqlite(object):
             df_transcript3['len_alt_AA'] = df_transcript3['new_AA'].str.len()
         
         if save_results:
-            perChrom.save_mutation_and_proteins(df_transcript3, outprefix)
+            if if individual is None or individual == '' or individual == 'None' or individual == []:
+                perChrom.save_mutation_and_proteins(df_transcript3, outprefix)
+            else:
+                save_mutation_and_proteins(df_transcript3, outprefix)
         else:
             return df_transcript3
 
@@ -190,6 +295,10 @@ def main():
     parser.add_argument('-o', '--out', help='output prefix. two file will be output. One is the annotation for mutated transcripts, one is the protein sequences. {out}.aa_mutations.csv, {out}.mutated_protein.fa. default "perChrom" ', default = "perChrom")
     parser.add_argument('-c', '--chromosome', help='''chromosome name/id, default="chr1" ''', default='chr1', type=str)
     parser.add_argument('-a', '--datatype', help='''input datatype, could be GENCODE_GTF, GENCODE_GFF3, RefSeq, Ensembl_GTF or gtf. default "gtf". Ensembl_GFF3 is not supported. ''', default='gtf', type=str, choices=['GENCODE_GTF', 'GENCODE_GFF3','RefSeq','Ensembl_GTF','gtf'])
+    parser.add_argument('-s', '--sample', help='''
+                        sample name in the vcf to extract the variant information. default: None, use all variants and do not consider samples.
+                        For multiple samples, use "," to join the sample names. For example, "--sample sample1,sample2,sample3".
+                        ''', default=None)
     
     if TEST:
         f = parser.parse_args(["-q", file_sqlite, "-m", file_mutations, "-t", str(threads), "-o", outprefix, "-c", chromosome, "-a", datatype])
@@ -203,16 +312,18 @@ def main():
     threads = f.threads
     chromosome = f.chromosome
     datatype = f.datatype
+    individual = f.sample
     
     # con = buildSqlite.get_connection(file_sqlite)
-    df_mutations = perChrom.parse_mutation(file_mutations=file_mutations, chromosome=chromosome)
+    # df_mutations = perChrom.parse_mutation(file_mutations=file_mutations, chromosome=chromosome)
 
     perchrom_sqlite = PerChrom_sqlite(file_sqlite = file_sqlite,
                     file_mutations = file_mutations,
                     threads = threads,
                     outprefix = outprefix,
                     datatype = datatype,
-                    chromosome = chromosome)
+                    chromosome = chromosome,
+                    individual = individual)
     print('run perChrom for chromosome', chromosome)
     perchrom_sqlite.run_perChrom()
 
