@@ -17,14 +17,25 @@ def main():
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('-g','--genome', help = 'the reference genome sequence in fasta format. It can be a gzip file', default='')
     parser.add_argument('-f', '--gtf', help='gtf file with CDS and exon annotations. It can be a gzip file', default='')
-    parser.add_argument('-m', '--mutations', help='''a file stores the variants. If the file ends with ".vcf" or ".vcf.gz", treat as vcf input. Otherwise, treat as TSV input. a string like "chr1-788418-CAG-C" or "chr1-942451-T-C,1-6253878-C-T,1-2194700-C-G" can used as variant input, too. ''', default = '', required=False)
+    parser.add_argument('-m', '--mutations', help='''
+                        a file stores the variants. 
+                        If the file ends with ".vcf" or ".vcf.gz", treat as vcf input. Otherwise, treat as TSV input. 
+                        A string like "chr1-788418-CAG-C" or "chr1-942451-T-C,1-6253878-C-T,1-2194700-C-G" can used as variant input, too. In this mode, --sample will not be used.
+                        If multiple vcf files are provided, use "," to join the file names. For example, "--mutations file1.vcf,file2.vcf". A pattern match is also supported for input vcf, but quote is required to get it work. For example '--mutations "file*.vcf" ' 
+                        
+                        ''', default = '', required=False)
     parser.add_argument('-p','--protein', help = 'protein sequences in fasta format. It can be a gzip file. Only proteins in this file will be checked', default='')
     parser.add_argument('-t', '--threads', help='number of threads/CPUs to run the program. default, use 20 or all CPUs available, whichever is smaller', type=int, default=min(20, os.cpu_count()))
     parser.add_argument('-o', '--out', help='''output prefix, folder path could be included. Three or five files will be saved depending on the variant file format. Outputs include the annotation for mutated transcripts, the mutated or all protein sequences, two variant files from vcf. {out}.pergeno.aa_mutations.csv, {out}.pergeno.protein_all.fa, {out}.protein_changed.fa, {out}.vcf2mutation_1/2.tsv. default "perGeno" ''', default="perGeno")
     parser.add_argument('-a', '--datatype', help='''input datatype, could be GENCODE_GTF, GENCODE_GFF3, RefSeq, Ensembl_GTF or gtf. default "gtf". Ensembl_GFF3 is not supported. ''', default='gtf', type=str, choices=['GENCODE_GTF', 'GENCODE_GFF3','RefSeq','Ensembl_GTF','gtf'])
     parser.add_argument('-k','--protein_keyword', help='''field name in attribute column of gtf file to determine ids for proteins. default "auto", determine the protein_keyword based on datatype. "transcript_id" for GENCODE_GTF, "protein_id" for "RefSeq" and "Parent" for gtf and GENCODE_GFF3 ''', default='auto')
     parser.add_argument('-F', '--no_filter', help='default only keep variant with value "PASS" FILTER column of vcf file. if set, do not filter', action='store_true')
-    parser.add_argument('-s', '--sample', help='sample name in the vcf to extract the variant information. default: None, extract the first sample. ', default=None)
+    parser.add_argument('-s', '--sample', help='''
+                        sample name in the vcf/tsv to extract the variant information. default: None, extract the first sample in vcf file, or use all variants in the tsv file. 
+                        For multiple samples, use "," to join the sample names. For example, "--sample sample1,sample2,sample3". 
+                        To use all samples, use "--sample ALL_SAMPLES". 
+                        To use all variants regardless where the variants from, use "--sample ALL_VARIANTS".
+                        ''', default=None)
     parser.add_argument('-A','--all_chromosomes', help='default keep variant in chromosomes and ignore those in short fragments of the genome. if set, use all chromosomes including fragments when parsing the vcf file', action='store_true')
     parser.add_argument('-D','--download', help='''download could be 'GENCODE','RefSeq','Ensembl','Uniprot', 'CHM13'. If set, PrecisonProDB will try to download genome, gtf and protein files from the Internet. Download will be skipped if "--genome, --gtf, --protein, (--uniprot)" were all set. Settings from "--genome, --gtf, --protein, (--uniprot), --datatype" will not be used if the files were downloaded by PrecisonProDB. default "". Note, if --sqlite is set, will not download any files ''', default='', type=str, choices=['GENCODE','RefSeq','Ensembl','Uniprot','CHM13',''])
     parser.add_argument('-U','--uniprot', help='''uniprot protein sequences. If more than one file, use "," to join the files. default "". For example, "UP000005640_9606.fasta.gz", or "UP000005640_9606.fasta.gz,UP000005640_9606_additional.fasta" ''', default='', type=str)
@@ -104,6 +115,15 @@ def main():
             print(f'file_mutations is a string {file_mutations} while file_sqlite is not provided. exit...')
             sys.exit()
             
+    if individual == 'ALL_SAMPLES' or individual == "ALL_VARIANTS" or ',' in str(individual):
+        if file_sqlite == '':
+            print(f'sample is set to {individual}. In this case, --sqlite must be set. exit...')
+            sys.exit()
+    if ',' in file_mutations or '*' in file_mutations:
+        if file_sqlite == '':
+            print(f'mutations is set to {file_mutations}. In this case, --sqlite must be set. exit...')
+            sys.exit()
+    
     if file_sqlite == '':
         if file_mutations == '':
             print('file_sqlite not provided. no input mutation file is provided. exit...')
