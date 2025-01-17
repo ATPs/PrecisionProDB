@@ -152,8 +152,11 @@ def get_writing_string_for_complex_variant(ls_to_write):
     return ''.join(ls_txt)
 
 
-def convertVCF2MutationComlex(file_vcf, outprefix = None, individual="ALL_SAMPLES", filter_PASS = True, chromosome_only = True):
+def convertVCF2MutationComplex(file_vcf, outprefix = None, individual="ALL_SAMPLES", filter_PASS = True, chromosome_only = True):
     '''convert vcf file to tsv file. with columns: chr, pos, ref, sample1__1, sample1__2, sample2__1, sample2__2, ..., sampleN__1, sampleN__2 columns
+    If individual is None, use the first sample in the vcf file. 
+    If individual == 'ALL_SAMPLES', use all samples in the vcf file.
+    If individual == 'ALL_VARIANTS', ignore sample columns
     '''
     if ',' in file_vcf:
         files_vcf = file_vcf.split(',')
@@ -195,6 +198,9 @@ def convertVCF2MutationComlex(file_vcf, outprefix = None, individual="ALL_SAMPLE
         elif individual_input == 'ALL_VARIANTS':
             individual_col = []
             individual = []
+        elif individual_input is None:
+            individual_col = [9]
+            individual = [columns[9]]
         else:
             individual = list(dict.fromkeys([i for i in individual_input.split(',') if i])) # remove duplicate and empty values
             if any([i not in columns for i in individual]):
@@ -291,7 +297,7 @@ def main():
         getMutationsFromVCF(file_vcf = f.file_vcf, outprefix = f.outprefix, individual=f.sample, filter_PASS = filter_PASS, chromosome_only = chromosome_only)
     elif ',' in  sample or sample == 'ALL_SAMPLES' or sample == 'ALL_VARIANTS':
         print('convert vcf to mutation information in version 2.0 mode')
-        convertVCF2MutationComlex(file_vcf = f.file_vcf, outprefix = f.outprefix, individual=f.sample, filter_PASS = filter_PASS, chromosome_only = chromosome_only)
+        convertVCF2MutationComplex(file_vcf = f.file_vcf, outprefix = f.outprefix, individual=f.sample, filter_PASS = filter_PASS, chromosome_only = chromosome_only)
     else:
         print('convert vcf to mutation information in version 1.0 mode')
         getMutationsFromVCF(file_vcf = f.file_vcf, outprefix = f.outprefix, individual=f.sample, filter_PASS = filter_PASS, chromosome_only = chromosome_only)
