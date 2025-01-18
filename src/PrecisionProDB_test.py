@@ -20,7 +20,7 @@ def run_command(command):
     else:
         return command, 'completed'
 
-def get_cmd_to_run(key_input, key_variant, sqlite_key):
+def get_cmd_to_run(key_input, key_variant, sqlite_key, output_test, dc_variant, dc_inputs, path_of_precisionprodb):
     '''
     '''
     if key_input == 'UniProt' and key_variant != 'str':
@@ -29,6 +29,7 @@ def get_cmd_to_run(key_input, key_variant, sqlite_key):
     else:
         cmd_UniProt = ' -t 4 '
     
+    folder_output_dir = ''
     folder_work = os.path.join(output_test, key_input, key_variant, sqlite_key)
     if not os.path.exists(folder_work):
         os.makedirs(folder_work)
@@ -59,7 +60,7 @@ def get_cmd_to_run(key_input, key_variant, sqlite_key):
     
     return cmd
 
-def main(dc_variant, dc_inputs, dc_sqlite, output_test):
+def main_test(dc_variant, dc_inputs, dc_sqlite, output_test, path_of_precisionprodb):
 
     ls_cmd = []
     ls_results = []
@@ -68,7 +69,7 @@ def main(dc_variant, dc_inputs, dc_sqlite, output_test):
             for sqlite_key in dc_sqlite:
                 if sqlite_key == 'no_sqlite' and key_variant == 'str':
                     continue
-                cmd = get_cmd_to_run(key_input, key_variant, sqlite_key)
+                cmd = get_cmd_to_run(key_input, key_variant, sqlite_key, output_test, dc_variant, dc_inputs, path_of_precisionprodb)
                 ls_cmd.append(cmd)
                 ls_results.append(run_command(cmd))
 
@@ -107,6 +108,8 @@ def main():
     output_test = (
         args.output if args.output else os.path.join(path_of_precisionprodb, "test_output")
     )
+    if not os.path.isabs(output_test):
+        output_test = os.path.abspath(output_test)
 
     print(f"PATH_OF_PRECISIONPRODB: {path_of_precisionprodb}")
     print(f"OUTPUT_TEST: {output_test}")
@@ -156,7 +159,7 @@ def main():
         'sqlite_two_step': ''
     }
     
-    main(dc_variant, dc_inputs, dc_sqlite, output_test)
+    main_test(dc_variant, dc_inputs, dc_sqlite, output_test, path_of_precisionprodb)
 
 
 if __name__ == '__main__':
