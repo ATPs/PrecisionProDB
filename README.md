@@ -7,6 +7,8 @@ PrecisionProDB is a Python package for proteogenomics, which can generate a cust
 # What's new in PrecisionProDB v2
 PrecisionProDB v2 has been developed to maintain compatibility with the previous version of the software. Notably, it introduces the option of utilizing SQLite files for the storage of intermediate data. This innovation has significantly reduced the runtime of the program, particularly when handling smaller VCF files.
 
+PrecisionProDB v2 now supports TSV input files, accommodating both single and multiple samples. Additionally, it can process multiple VCF files simultaneously. When using VCF input, the software supports multiple samples as well. Users can employ the "--sample ALL_SAMPLES" option to create a population proteomic database similar to [ProHap](https://github.com/ProGenNo/ProHap). Alternatively, the "--sample ALL_VARIANTS" option allows for the generation of a database that focuses solely on variants, disregarding genotype information across different samples.
+
 With a pre-build sqlite file, it is very fast to check effect of variants in string format like `"chr1-942451-T-C,1-6253878-C-T,1-2194700-C-G,1-1719406-G-A"`.
 
 It is updated to support the [human Genome assembly T2T-CHM13v2.0](https://www.ncbi.nlm.nih.gov/datasets/genome/GCF_009914755.1/) and its annotation in [RefSeq](https://ftp.ncbi.nlm.nih.gov/genomes/refseq/vertebrate_mammalian/Homo_sapiens/annotation_releases/current/GCF_009914755.1-RS_2024_08/).
@@ -296,6 +298,8 @@ python Path_of_PrecisionProDB/src/PrecisionProDB.py -h
 Notes:
 
 * If the chromosome name in gtf file and mutation file is different, `-a RefSeq` is needed to do a match, and the `-k` need to be adjusted, to match the name in the protein file and in the gtf file. For [ORFanage](https://www.nature.com/articles/s43588-023-00496-1) translation with RefSeq-CHM13 model with mutations with chromosme "chr" in the mutation file, the parameter should be like `-a RefSeq -k transcript_id`
+
+* The input protein id should not contain the symbol '__' which is double underscore symbols.
 
 # Outputs 
 
