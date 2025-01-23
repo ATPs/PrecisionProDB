@@ -81,7 +81,7 @@ def main():
 
     # download required files if download is set. will not download if file_sqlite is set. 
     download = download.upper()
-    if download != '' and file_sqlite == '':
+    if download != '':
         print('-D --download is set to be', download, '\n')
         if download != 'UNIPROT':
             if file_genome != '' and file_gtf != '' and file_protein != '':
