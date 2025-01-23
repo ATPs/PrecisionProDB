@@ -234,6 +234,8 @@ def getCodons(ttdf, AA_len=None):
     '''
     if AA_len is None:
         AA_len = ttdf.shape[0] // 3
+    if AA_len * 3 >= ttdf.shape[0]:
+        AA_len = ttdf.shape[0] // 3
     ttdf = ttdf.iloc[:AA_len * 3]
     tdf_result = ttdf.groupby(np.arange(AA_len * 3) // 3).agg({'chr':'first', 'strand':'first', 'locs':'first', 'bases':lambda x:''.join(x), 'variant_id':lambda x:','.join(list(dict.fromkeys([e for e in list(x) if pd.notnull(e)])))})
     tdf_result.columns = ['chr', 'strand', 'codon1', 'codon','variants']
@@ -591,8 +593,8 @@ def translateCDSplusWithMut(r, df_mutations):
     
     codons_ref = getCodons(df_CDSref, AA_len=AA_len)
     codons_alt = getCodons(df_CDSalt, AA_len=None)
-    codons_ref['AA_ref'] = list(AA_seq)
-    codons_ref['AA_index'] = list(range(1, AA_len+1))
+    codons_ref['AA_ref'] = list(AA_seq)[:codons_ref.shape[0]]
+    codons_ref['AA_index'] = list(range(1, codons_ref.shape[0]+1))
     if frame !=0: 
         codons_ref['AA_index'] = codons_ref['AA_index'] + 1
     # add ref AA to codon_alt
