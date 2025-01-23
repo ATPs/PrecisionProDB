@@ -379,6 +379,7 @@ def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL
 
     write_header = True
     for file_vcf in files_vcf:
+        print('start converting vcf file:', file_vcf)
         fo = openFile(file_vcf)
         for line in fo:
             if not line.startswith('##'):
@@ -431,6 +432,7 @@ def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL
             pool.close()
             pool.join()
         
+        print('finished converting vcf file:', file_vcf)
     fout.close()
     return column_for_samples
 
