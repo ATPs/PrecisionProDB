@@ -56,7 +56,6 @@ def is_valid(value):
     if value in [1, '1', True, 'True', 2, '2', 3, '3', 4, '4', 5, '5', 6, '6', 7, '7', 8, '8', 9, '9']:
         return True
 
-    print('warning: unexpected value:', value, 'in mutation file. use as True with causion!')
     return True
 
 
