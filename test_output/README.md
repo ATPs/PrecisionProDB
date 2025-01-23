@@ -10,7 +10,7 @@ test scripts looks like
 PATH_OF_PRECISIONPRODB=/data/p/xiaolong/PrecisionProDB
 python $PATH_OF_PRECISIONPRODB/src/PrecisionProDB_test.py \
                 -s $PATH_OF_PRECISIONPRODB \
-                -o data/p/xiaolong/PrecisionProDB/test_output
+                -o /data/p/xiaolong/PrecisionProDB/test_output
 ```
 
 then a combination of many testing runs were performed.
