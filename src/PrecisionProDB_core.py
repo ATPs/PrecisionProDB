@@ -391,6 +391,38 @@ class PerGeno(object):
         print('finish splitting the mutation file')
         return chromosomes_mutation
 
+    def splitMutationByChromosomeLarge(self, chromosomes_genome_description=None, chromosomes_genome=None):
+        '''split mutation file based on chromosomes
+        file_mutations is generated from vcf file, no need to read with pandas or further processing
+        '''
+        tempfolder = self.tempfolder
+        file_mutations = self.file_mutations
+        if chromosomes_genome is None:
+            chromosomes_genome = self.chromosomes_genome
+        if chromosomes_genome_description is None:
+            chromosomes_genome_description = self.chromosomes_genome_description
+        
+        dc_output = {}
+        fo = openFile(file_mutations)
+        for line in fo:
+            break
+        header = line
+        for line in fo:
+            k = line.split('\t', maxsplit=1)[0]
+            k_new = get_k_new(k, chromosomes_genome, chromosomes_genome_description)
+            tf = os.path.join(tempfolder, k_new + '.mutation.tsv')
+            if k_new not in dc_output:
+                dc_output[k_new] = open(tf,'w')
+                dc_output[k_new].write(header)
+            dc_output[k_new].write(line)
+        
+        for k_new in dc_output:
+            dc_output[k_new].close()
+        chromosomes_mutation = list(dc_output.keys())
+        
+        print('finish splitting the mutation file')
+        return chromosomes_mutation
+
     def splitGtfByChromosomes(self,dc_protein2chr):
         '''split gtf file based on chromosome. only keep proteins in file_protein
         '''

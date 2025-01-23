@@ -84,7 +84,7 @@ def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_ke
         individual = ''
     tempfolder = pergeno.tempfolder
     pergeno.chromosomes_genome = chromosomes_genome
-    chromosomes_mutation = pergeno.splitMutationByChromosome(chromosomes_genome_description=chromosomes_genome_description, chromosomes_genome=chromosomes_genome)
+    chromosomes_mutation = pergeno.splitMutationByChromosomeLarge(chromosomes_genome_description=chromosomes_genome_description, chromosomes_genome=chromosomes_genome)
 
     # run runSinglePerChromSqlite
     chromosomes_mutated = [runSinglePerChromSqlite(file_sqlite, f'{tempfolder}/{chromosome}.mutation.tsv', tempfolder, threads, chromosome, datatype, individual) for chromosome in chromosomes_mutation]
