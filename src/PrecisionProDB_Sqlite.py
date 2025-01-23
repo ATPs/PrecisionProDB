@@ -134,7 +134,7 @@ def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_ke
 
     print('finished!')
 
-def runPerChomSqlite_vcf(file_mutations, file_sqlite, threads, outprefix, datatype, protein_keyword, keep_all, individual, chromosome_only, filter_PASS, chromosomes_genome, chromosomes_genome_description, file_gtf):
+def runPerChomSqlite_vcf(file_mutations, file_sqlite, threads, outprefix, datatype, protein_keyword, keep_all, individual, chromosome_only, filter_PASS, chromosomes_genome, chromosomes_genome_description, file_gtf, info_field = None, info_field_thres=None):
     '''
     '''
     from vcf2mutation import convertVCF2MutationComplex
@@ -142,7 +142,7 @@ def runPerChomSqlite_vcf(file_mutations, file_sqlite, threads, outprefix, dataty
     # get two mutation files from vcf file
     print('start extracting mutation file from the vcf input')
     outprefix_vcf = outprefix + '.vcf2mutation'
-    individual = convertVCF2MutationComplex(file_vcf = file_mutations, outprefix = outprefix_vcf, individual=individual, filter_PASS = filter_PASS, chromosome_only = chromosome_only)
+    individual = convertVCF2MutationComplex(file_vcf = file_mutations, outprefix = outprefix_vcf, individual_input=individual, filter_PASS = filter_PASS, chromosome_only = chromosome_only, info_field = info_field, info_field_thres=info_field_thres, threads = threads)
     individual = ','.join(individual)
     print('finished extracting mutations from the vcf file')
     file_mutations = outprefix + '.vcf2mutation.tsv'
@@ -221,7 +221,7 @@ def check_sqlite_file(file_path):
         if 'conn' in locals():
             conn.close()
             
-def main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite):
+def main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite, info_field=None, info_field_thres=None):
     '''
     the main function of PrecisionProDB_Sqlite
     '''
@@ -303,7 +303,9 @@ def main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protei
             chromosome_only = chromosome_only,
             chromosomes_genome=chromosomes_genome,
             chromosomes_genome_description=chromosomes_genome_description,
-            file_gtf=file_gtf
+            file_gtf=file_gtf,
+            info_field=info_field,
+            info_field_thres=info_field_thres
             )
     else:
         print('variant file is a tsv file')
@@ -356,6 +358,9 @@ def main():
     parser.add_argument('-A','--all_chromosomes', help='default keep variant in chromosomes and ignore those in short fragments of the genome. if set, use all chromosomes including fragments when parsing the vcf file', action='store_true')
     parser.add_argument('--keep_all', help='If set, do not delete files generated during the run', action='store_true')
     parser.add_argument('-S','--sqlite', help='''A path of sqlite file for re-use of annotation info. default '', do not use sqlite. The program will create a sqlite file if the file does not exist. If the file already exists, the program will use data stored in the file. It will cause error if the content in the sqlite file is not as expected. ''', default='', type=str)
+    parser.add_argument('--info_field', help='fields to use in the INFO column of the vcf file to filter variants. Default None', default = None)
+    parser.add_argument('--info_field_thres', help='threhold for the info field. Default None, do not filter any variants. If set "--info_filed AF --info_field_thres 0.01", only keep variants with AF >= 0.01', default = None)
+
     
     if TEST:
         f = parser.parse_args(f"-g {file_genome} -f {file_gtf} -m {file_mutations} -p {file_protein} -t {threads} -o {outprefix} -a {datatype} -k {protein_keyword} -F --keep_all -S {file_sqlite}".split())
@@ -378,7 +383,7 @@ def main():
     print(description)
     print(f)
 
-    main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite)
+    main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite, info_field=f.info_field, info_field_thres=f.info_field_thres)
 
 if __name__ == '__main__':
     main()

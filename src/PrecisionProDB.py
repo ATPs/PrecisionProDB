@@ -44,6 +44,8 @@ def main():
     parser.add_argument('--keep_all', help='If set, do not delete files generated during the run', action='store_true')
 
     parser.add_argument('-S','--sqlite', help='''A path of sqlite file for re-use of annotation info. default '', do not use sqlite. The program will create a sqlite file if the file does not exist. If the file already exists, the program will use data stored in the file. It will cause error if the content in the sqlite file is not as expected. ''', default='', type=str)
+    parser.add_argument('--info_field', help='fields to use in the INFO column of the vcf file to filter variants. Default None', default = None)
+    parser.add_argument('--info_field_thres', help='threhold for the info field. Default None, do not filter any variants. If set "--info_filed AF --info_field_thres 0.01", only keep variants with AF >= 0.01', default = None)
 
     
     f = parser.parse_args()
@@ -165,7 +167,7 @@ def main():
         # use Sqlite
         import PrecisionProDB_Sqlite
         print('using sqlite database to speed up')
-        PrecisionProDB_Sqlite.main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite)
+        PrecisionProDB_Sqlite.main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite, info_field = f.info_field, info_field_thres = f.info_field_thres)
 
     pattern = re.compile(r'(chr)?(\d+)-(\d+)-([A-Za-z]+)-([A-Za-z]+)')
     match = pattern.match(file_mutations)
