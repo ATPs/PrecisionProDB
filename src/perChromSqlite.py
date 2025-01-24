@@ -120,7 +120,7 @@ def convert_df_transcript2_to_df_transcript3(df_transcript2, df_mutations, indiv
         individual = individual
     elif individual == 'ALL_SAMPLES':
         individual = [i for i in df_mutations.columns if i not in ['chr', 'pos', '', 'ref', 'alt', 'pos_end']]
-        print('warning: individual is ALL_SAMPLES, all columns in file_muations other than chr pos ref alt were used as individuals, which may cause problem. individuals were set as:', individual)
+        print('warning: individual is ALL_SAMPLES, all columns in file_mutations other than chr pos ref alt were used as individuals, which may cause problem. individuals were set as:', individual)
     elif ',' in individual:
         individual = individual.split(',')
     else:
