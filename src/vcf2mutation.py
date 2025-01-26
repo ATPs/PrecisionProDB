@@ -7,6 +7,12 @@ import os
 import itertools
 from multiprocessing import Pool
 
+try:
+    import tqdm
+except:
+    print('Cannot import tqdm. Will not use tqdm.')
+    tqdm = False
+
 import itertools
 
 def grouper_it(n, iterable, M=1):
@@ -329,7 +335,7 @@ def processOneLineOfVCF(line,
             ls_to_write = [chromosome, position, reference, alternative, '\t'.join(str(e) for e in ls_alternatives)]
         else:
             ls_to_write = [chromosome, position, reference, alternative]
-        new_line = '\t'.join(ls_to_write) + '\n'
+        new_line = get_writing_string_for_complex_variant(ls_to_write)
         ls_new_line.append(new_line)
     
     return ''.join(ls_new_line)
@@ -426,7 +432,11 @@ def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL
                 fout.write(new_line)
         else:
             pool = Pool(threads)
-            for ls_lines in grouper_it(1000, fo, threads):
+            if tqdm:
+                to_iter_value = tqdm.tqdm(grouper_it(1000, fo, threads))
+            else:
+                to_iter_value = grouper_it(1000, fo, threads)
+            for ls_lines in to_iter_value:
                 new_lines = pool.starmap(processManyLineOfVCF, [(lines, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, chromosomes, file_vcf) for lines in ls_lines])
                 fout.write(''.join(new_lines))
             pool.close()
