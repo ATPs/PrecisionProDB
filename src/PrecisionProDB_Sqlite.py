@@ -43,7 +43,7 @@ def runSinglePerChromSqlite(file_sqlite, file_mutations, tempfolder, threads, ch
     run PerChrom_sqlite for a single chromosome
     '''
     outprefix = os.path.join(tempfolder, chromosome)
-    print(file_mutations)
+    # print(file_mutations)
     perchrom_sqlite = perChromSqlite.PerChrom_sqlite(file_sqlite = file_sqlite,
                     file_mutations = file_mutations,
                     threads = threads,
