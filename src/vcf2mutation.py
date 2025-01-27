@@ -6,6 +6,8 @@ import glob
 import os
 import itertools
 from multiprocessing import Pool
+import sqlite3
+
 
 try:
     import tqdm
@@ -352,6 +354,82 @@ def processManyLineOfVCF(lines,
     
     return ''.join(processOneLineOfVCF(line, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, chromosomes, file_vcf) for line in lines)
 
+
+
+def sanitize_identifier(identifier: str) -> str:
+    """
+    Sanitize a string to make it a valid identifier (e.g., for SQLite table names, column names, etc.).
+
+    Args:
+        identifier (str): The original string to sanitize.
+
+    Returns:
+        str: A sanitized string suitable for use as an identifier.
+    """
+    # Replace invalid characters with underscores
+    sanitized_name = re.sub(r'[^a-zA-Z0-9_]', '_', identifier)
+    
+    # Ensure the name starts with a letter or underscore
+    if not sanitized_name[0].isalpha() and sanitized_name[0] != '_':
+        sanitized_name = '_' + sanitized_name
+    
+    return sanitized_name
+
+
+def tsv2sqlite(tsv_file: str, sqlite_file: str = None, batch_size: int = 100):
+    """
+    Convert a TSV file to a SQLite database, using the row index as the primary key.
+
+    Args:
+        tsv_file (str): Path to the input TSV file.
+        sqlite_file (str): Path to the output SQLite database file.
+        batch_size (int): Number of rows to process in each batch. Default is 100.
+    """
+    if sqlite_file is None:
+        sqlite_file = tsv_file + '.sqlite'
+    
+    # remove sqlite file if it already exists
+    if os.path.exists(sqlite_file):
+        print(f"removing existing sqlite file: {sqlite_file}")
+        os.remove(sqlite_file)
+    
+    # Create a connection to the SQLite database
+    conn = sqlite3.connect(sqlite_file)
+    cursor = conn.cursor()
+
+    # Read the TSV file in chunks
+    reader = pd.read_csv(tsv_file, sep='\t', chunksize=batch_size)
+
+    # Process each chunk
+    print('storeing tsv file to sqlite database...')
+    if tqdm:
+        to_iter_value = tqdm.tqdm(enumerate(reader))
+    else:
+        to_iter_value = enumerate(reader)
+    for i, chunk in to_iter_value:
+        columns = [i for i in chunk.columns]
+        column_group_N = len(columns) // 1000 + 1
+        # split columns to column_group_N parts
+        ls_columns = [columns[i::column_group_N] for i in range(column_group_N)]
+        for table_name, columns_use in enumerate(ls_columns):
+            table_name = 'table_'+str(table_name)
+            if i == 0:
+                # Generate the CREATE TABLE query dynamically based on the columns
+                create_table_query = f'''
+                CREATE TABLE IF NOT EXISTS {table_name} (
+                    {', '.join([f'{col} TEXT' for col in columns_use])}
+                );
+                '''
+                cursor.execute(create_table_query)
+                conn.commit()
+
+            # Insert the chunk into the SQLite table
+            chunk[columns_use].to_sql(table_name, conn, if_exists='append', index=False)
+
+    # Close the database connection
+    conn.close()
+
+    print(f"TSV file '{tsv_file}' has been successfully converted to SQLite database '{sqlite_file}'.")
 
 def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL_SAMPLES", filter_PASS = True, chromosome_only = True, info_field = None, info_field_thres=None, threads = 1):
     '''convert vcf file to tsv file. with columns: chr, pos, ref, sample1__1, sample1__2, sample2__1, sample2__2, ..., sampleN__1, sampleN__2 columns
