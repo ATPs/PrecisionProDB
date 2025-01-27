@@ -84,9 +84,11 @@ def get_protein_id_from_df_mutations(df_mutations, file_sqlite, cpu_counts=10):
     
     return combined_results
 
-def convert_df_transcript2_to_df_transcript3_helper(protein_id, df_transcript2, df_mutations, individual):
+def convert_df_transcript2_to_df_transcript3_helper(protein_id, df_transcript2, df_mutations, individual, **kargs):
     '''
     protein_id is a protein_id in df_transcript2
+    for each protein_id, get the mutations in each individual.
+    return a list of tuple, each tuple is (tuple of variant_index, individuals with this variant_index joined by ',')
     '''
     mutations = df_transcript2.loc[protein_id]['mutations']
     tdf_m = df_mutations.loc[mutations]
@@ -105,7 +107,7 @@ def convert_df_transcript2_to_df_transcript3_helper(protein_id, df_transcript2, 
     tdc = {k:','.join(v) for k,v in tdc.items()}
     return list(tdc.items())
 
-def convert_df_transcript2_to_df_transcript3(df_transcript2, df_mutations, individual = None, cpu_counts=1):
+def convert_df_transcript2_to_df_transcript3(df_transcript2, df_mutations, individual = None, cpu_counts=1, **kargs):
     '''
     convert df_transcript2 to df_transcript3
     if individual is None or individual is '', return df_transcript2
@@ -195,12 +197,17 @@ class PerChrom_sqlite(object):
         self.outprefix = outprefix # where to store the results
         self.datatype = datatype # input datatype, could be GENCODE_GTF, GENCODE_GFF3, RefSeq or gtf
         self.chromosome = chromosome # chromosome name
-        self.individual = individual # individual name
+        self.extra_large_file_mutation = False # whether the mutation file is larger than 1G
         
-        # dataframe to store the mutation information
-        # global df_mutations
+        # if file_mutation is larger than 1G, only read ['chr', 'pos', 'ref', 'alt']
+        if isinstance(self.file_mutations, str):
+            if os.path.exists(self.file_mutations):
+                if os.path.getsize(self.file_mutations) > 1000000000:
+                    self.extra_large_file_mutation = True
         
-        if isinstance(self.file_mutations, pd.DataFrame):
+        if self.extra_large_file_mutation:
+            df_mutations = perChrom.readExtraLargeMutationFile(file_mutations, nrows=2)
+        elif isinstance(self.file_mutations, pd.DataFrame):
             df_mutations = self.file_mutations
             self.df_mutations = df_mutations
             # print(df_mutations)
@@ -210,11 +217,35 @@ class PerChrom_sqlite(object):
             self.df_mutations = df_mutations
         else:
             print(self.chromosome, 'No mutation file provided, will not do mutation analysis')
+            self.df_mutations = pd.DataFrame(columns=['chr', 'pos', 'ref', 'alt'])
         
         self.con = buildSqlite.get_connection(self.file_sqlite)
-        # global con
-        # if con is None:
-        #     con = buildSqlite.get_connection(self.file_sqlite)
+        
+        if individual is None or individual == '' or individual == 'None' or individual == [] or individual == 'ALL_VARIANTS':
+            individual = None
+        elif isinstance(individual, list):
+            individual = individual
+        elif individual == 'ALL_SAMPLES':
+            individual = [i for i in df_mutations.columns if i not in ['chr', 'pos', '', 'ref', 'alt', 'pos_end']]
+            print('warning: individual is ALL_SAMPLES, all columns in file_mutations other than chr pos ref alt were used as individuals, which may cause problem. individuals were set as:', individual)
+        elif ',' in individual:
+            individual = individual.split(',')
+        elif individual in df_mutations.columns:
+            individual = [individual]
+        else:
+            individual = None
+            print('warning: individual is not in file_mutations, will not be used for do mutation analysis')
+        
+        self.individual = individual
+        
+        if self.extra_large_file_mutation:
+            self.df_mutations = perChrom.parse_mutation(file_mutations, columns_to_include=['chr', 'pos', 'ref', 'alt'])
+            from vcf2mutation import tsv2memmap
+            shape = (self.df_mutations.shape[0], len(self.individual))
+            tsv2memmap(file_mutations, individuals = self.individual, memmap_file=file_mutations + '.memmap')
+            self.shape = shape
+            self.file_memmap = file_mutations + '.memmap'
+
 
 
     def run_perChrom(self, save_results = True):
@@ -260,7 +291,10 @@ class PerChrom_sqlite(object):
                     df_transcript2.at[transcript_id, 'mutations'] = []
                 df_transcript2 = df_transcript2[~df_transcript2.index.isin(set(tdf_special.index))]
 
-        df_transcript3 = convert_df_transcript2_to_df_transcript3(df_transcript2, df_mutations, individual = individual, cpu_counts=cpu_counts)
+        if not self.extra_large_file_mutation
+            df_transcript3 = convert_df_transcript2_to_df_transcript3(df_transcript2, df_mutations, individual = individual, cpu_counts=cpu_counts)
+        else:
+            df_transcript3 = convert_df_transcript2_to_df_transcript3(df_transcript2, df_mutations, individual = individual, cpu_counts=cpu_counts, shape=self.shape, file_memmap = self.file_memmap)
     
         if df_transcript3.shape[0] == 0:
             print('No protein sequences to change for chromosome', chromosome)
