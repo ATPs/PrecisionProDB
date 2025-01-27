@@ -7,7 +7,7 @@ import os
 import itertools
 from multiprocessing import Pool
 import sqlite3
-
+import numpy as np
 
 try:
     import tqdm
@@ -430,6 +430,55 @@ def tsv2sqlite(tsv_file: str, sqlite_file: str = None, batch_size: int = 100):
     conn.close()
 
     print(f"TSV file '{tsv_file}' has been successfully converted to SQLite database '{sqlite_file}'.")
+
+def tsv2memmap(tsv_file, individuals = None, memmap_file=None, batch_size=100):
+    '''tsv file is a tsv file with columns: chr, pos, ref, sample1__1, sample1__2, sample2__1, sample2__2, ..., sampleN__1, sampleN__2 columns
+    individuals is a list of individuals to be used. the column values must be 0 or 1
+    if memmap_file is None, memmap_file = tsv_file + '.memmap'
+    '''
+    if memmap_file is None:
+        memmap_file = tsv_file + '.memmap'
+        
+    if individuals is None:
+        tdf = pd.read_csv(tsv_file, sep='\t', nrows=1)
+        individuals = [i for i in tdf.columns if i not in ['chr', 'pos', 'ref', 'alt','pos_end']]
+    elif ',' in individuals:
+        individuals = individuals.split(',')
+    elif isinstance(individuals, str):
+        individuals = [individuals]
+    else:
+        individuals = individuals
+    
+    # Read the TSV file in chunks
+    reader = pd.read_csv(tsv_file, sep='\t', chunksize=batch_size, usecols=individuals, dtype='int8')
+
+    # Get total number of rows
+    total_rows = sum(1 for _ in open(tsv_file)) - 1  # Subtract header row
+    
+    # Initialize memory-mapped file
+    shape = (total_rows, len(individuals))
+    mmap = np.memmap(memmap_file, dtype='int8', mode='w+', shape=shape)
+    
+    # Process each chunk
+    print('storing tsv file to memmap...')
+    if tqdm:
+        to_iter_value = tqdm.tqdm(enumerate(reader), total = total_rows//batch_size + 1)
+    else:
+        to_iter_value = enumerate(reader)
+
+    # Write data to memmap
+    row_offset = 0
+    for i, chunk in to_iter_value:
+        chunk = chunk[individuals]
+        chunk_size = chunk.shape[0]
+        mmap[row_offset:row_offset + chunk_size] = chunk.values
+        row_offset += chunk_size
+        
+    # Flush changes to disk
+    mmap.flush()
+    del mmap
+    print(f"TSV file '{tsv_file}' has been successfully converted to memory-mapped file '{memmap_file}'")
+
 
 def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL_SAMPLES", filter_PASS = True, chromosome_only = True, info_field = None, info_field_thres=None, threads = 1):
     '''convert vcf file to tsv file. with columns: chr, pos, ref, sample1__1, sample1__2, sample2__1, sample2__2, ..., sampleN__1, sampleN__2 columns
