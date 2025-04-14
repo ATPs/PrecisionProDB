@@ -505,14 +505,29 @@ def tsv2memmap(tsv_file, individuals = None, memmap_file=None, batch_size=100):
     print(f"TSV file '{tsv_file}' has been successfully converted to memory-mapped file '{memmap_file}'")
 
 # --- Writer Function ---
+# --- Writer Function (Corrected) ---
 def writer_job(q, file_handle):
     """Gets strings from the queue and writes them to the file."""
+    print("Writer thread started.") # Debug print
     while True:
-        item = q.get()
+        item = q.get() # Blocks until an item is available
         if item is None: # Sentinel value indicates end of processing
+            print("Writer thread received sentinel. Finishing.") # Debug print
+            q.task_done() # Mark the sentinel item as processed *before* breaking
             break
-        file_handle.write(item)
-        q.task_done() # Notify queue that item processing is complete
+        try:
+            file_handle.write(item)
+            # Optionally flush periodically if buffering is an issue
+            # file_handle.flush()
+        except Exception as e:
+             print(f"Error writing item in writer thread: {e}", file=sys.stderr)
+             # Decide if you want to stop or continue
+        finally:
+            # Crucially, mark the item as done *after* processing (or attempting to)
+            # This happens even if writing fails, to prevent deadlock on q.join()
+             if item is not None: # Don't double-count task_done for sentinel
+                 q.task_done()
+    print("Writer thread finished.") # Debug print
 
 
 def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL_SAMPLES", filter_PASS = True, chromosome_only = True, info_field = None, info_field_thres=None, threads = 1):
@@ -556,18 +571,20 @@ def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL
             return [] # Or raise error
 
     # --- Setup Writer Thread ---
+    fout = open(file_output, 'w')
     write_queue = queue.Queue(maxsize=threads * 2) # Buffer size heuristic
     writer_thread = threading.Thread(target=writer_job, args=(write_queue, fout))
     writer_thread.start()
 
 
-    fout = open(file_output, 'w')
+    
 
     write_header = True
     column_for_samples = [] # Keep track of sample columns generated
 
     try:
         for file_vcf in files_vcf:
+            vcf_file_path = file_vcf
             print('start converting vcf file:', file_vcf)
             try:
                 fo = openFile(vcf_file_path)
@@ -579,22 +596,22 @@ def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL
                     continue
             
             # Read header lines to find samples
-                header_line = None
-                for line in fo:
-                    if line.startswith('##'):
-                        continue
-                    if line.startswith('#CHROM'):
-                        header_line = line
-                        break
-                    else: # Unexpected line before #CHROM header
-                        print(f"Warning: Unexpected line format before #CHROM header in {vcf_file_path}. Attempting to continue.")
-                        header_line = line # Try processing it as header anyway? Risky.
-                        break
-
-                if header_line is None:
-                    print(f"Warning: #CHROM header line not found in {vcf_file_path}. Skipping.")
-                    fo.close()
+            header_line = None
+            for line in fo:
+                if line.startswith('##'):
                     continue
+                if line.startswith('#CHROM'):
+                    header_line = line
+                    break
+                else: # Unexpected line before #CHROM header
+                    print(f"Warning: Unexpected line format before #CHROM header in {vcf_file_path}. Attempting to continue.")
+                    header_line = line # Try processing it as header anyway? Risky.
+                    break
+
+            if header_line is None:
+                print(f"Warning: #CHROM header line not found in {vcf_file_path}. Skipping.")
+                fo.close()
+                continue
                     
             columns = header_line.strip().split('\t')
             if len(columns) < 9:
@@ -656,7 +673,7 @@ def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL
             
             # print(threads)
             # use single thread is thread set to 1 or file_vcf smaller than 10MB
-            if threads == 1 or os.path.getsize(file_vcf) < 10*1024*1024::
+            if threads == 1 or os.path.getsize(file_vcf) < 10*1024*1024:
                 for line in fo:
                     new_line = processOneLineOfVCF(line, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, CHROMOSOMES, file_vcf)
                     if new_line:
