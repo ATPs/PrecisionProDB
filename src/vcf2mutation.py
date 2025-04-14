@@ -6,6 +6,9 @@ import glob
 import os
 import itertools
 from multiprocessing import Pool
+from multiprocessing import Manager # Manager needed for shared queue if using imap_unordered, but not for starmap with main thread queue
+import queue # Thread-safe queue
+import threading # For the writer thread
 import sqlite3
 import numpy as np
 
@@ -15,7 +18,6 @@ except:
     print('Cannot import tqdm. Will not use tqdm.')
     tqdm = False
 
-import itertools
 
 def grouper_it(n, iterable, M=1):
     """
@@ -196,8 +198,31 @@ def split_complex_variant(ls_to_write):
     ls_to_write = [chromosome, position, reference, alternative, '\t'.join(str(e) for e in ls_alternatives)]
     or ls_to_write = [chromosome, position, reference, alternative]
     deal with complex variants. usually it should be like chr1-111-A-T, chr1-111-AT-A, chr1-111-A-AT. but some times, it could be like chr1-111-GG-TT
+    
+    Args:
+        ls_to_write (list): A list representing a variant row. Expected format:
+            [chromosome, position, reference, alternative, optional_col1, optional_col2, ...]
+            Example: ['chr1', '100', 'A', 'T']
+            Example: ['chr1', '200', 'G', 'TT', '0', '1']
+            Example: ['chr1', '300', 'GG', 'TT', '1', '1']
+
+    Returns:
+        list[list]: A list containing one or more lists, where each inner list
+                    represents a decomposed variant row ready for output.
+                    Format: [chromosome, position, reference, alternative, optional_col1, ...]
+
     '''
     chromosome, position, reference, alternative = ls_to_write[:4]
+    
+    len_ref = len(reference)
+    len_alt = len(alternative)
+    # If it's a simple SNP, insertion, or deletion (at least one allele has length 1)
+    # No decomposition is needed according to the original logic's effective outcome.
+    if len_ref == 1 or len_alt == 1:
+        # Return the original variant wrapped in a list
+        return [ls_to_write]
+    
+    
     position = int(position)
     ls = []
     n = min(len(reference), len(alternative))
@@ -218,8 +243,8 @@ def get_writing_string_for_complex_variant(ls_to_write):
     deal with complex variants. usually it should be like chr1-111-A-T, chr1-111-AT-A, chr1-111-A-AT. but some times, it could be like chr1-111-GG-TT
     
     '''
-    ls = split_complex_variant(ls_to_write)
-    ls_txt = ['\t'.join([str(e) for e in i]) + '\n' for i in ls]
+    split_variants = split_complex_variant(ls_to_write)
+    ls_txt = ['\t'.join(map(str, variant_row)) + '\n' for variant_row in split_variants]
     return ''.join(ls_txt)
 
 
@@ -479,6 +504,16 @@ def tsv2memmap(tsv_file, individuals = None, memmap_file=None, batch_size=100):
     del mmap
     print(f"TSV file '{tsv_file}' has been successfully converted to memory-mapped file '{memmap_file}'")
 
+# --- Writer Function ---
+def writer_job(q, file_handle):
+    """Gets strings from the queue and writes them to the file."""
+    while True:
+        item = q.get()
+        if item is None: # Sentinel value indicates end of processing
+            break
+        file_handle.write(item)
+        q.task_done() # Notify queue that item processing is complete
+
 
 def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL_SAMPLES", filter_PASS = True, chromosome_only = True, info_field = None, info_field_thres=None, threads = 1):
     '''convert vcf file to tsv file. with columns: chr, pos, ref, sample1__1, sample1__2, sample2__1, sample2__2, ..., sampleN__1, sampleN__2 columns
@@ -500,77 +535,160 @@ def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL
             return []
     
     if outprefix is None:
-        file_output = file_vcf + '.tsv'
+        # Derive output name from first VCF file if multiple, handle potential .gz
+        base_name = os.path.basename(files_vcf[0])
+        if base_name.endswith(".vcf.gz"):
+             file_output = base_name[:-7] + '.tsv'
+        elif base_name.endswith(".vcf"):
+             file_output = base_name[:-4] + '.tsv'
+        else:
+             file_output = base_name + '.tsv'
+        print(f"Output prefix not specified, writing to '{file_output}'")
+        # file_output = file_vcf + '.tsv'
     else:
         file_output = outprefix + '.tsv'
         
     if info_field:
-        if info_field_thres:
+        try:
             info_field_thres = float(info_field_thres)
-        
+        except ValueError:
+            print(f"Error: --info_field_thres ('{info_field_thres}') must be a number.")
+            return [] # Or raise error
+
+    # --- Setup Writer Thread ---
+    write_queue = queue.Queue(maxsize=threads * 2) # Buffer size heuristic
+    writer_thread = threading.Thread(target=writer_job, args=(write_queue, fout))
+    writer_thread.start()
+
+
     fout = open(file_output, 'w')
 
     write_header = True
-    for file_vcf in files_vcf:
-        print('start converting vcf file:', file_vcf)
-        fo = openFile(file_vcf)
-        for line in fo:
-            if not line.startswith('##'):
-                break
+    column_for_samples = [] # Keep track of sample columns generated
+
+    try:
+        for file_vcf in files_vcf:
+            print('start converting vcf file:', file_vcf)
+            try:
+                fo = openFile(vcf_file_path)
+            except FileNotFoundError:
+                print(f"Warning: Could not open file {vcf_file_path}. Skipping.")
+                continue
+            except Exception as e:
+                    print(f"Warning: Error opening file {vcf_file_path}: {e}. Skipping.")
+                    continue
+            
+            # Read header lines to find samples
+                header_line = None
+                for line in fo:
+                    if line.startswith('##'):
+                        continue
+                    if line.startswith('#CHROM'):
+                        header_line = line
+                        break
+                    else: # Unexpected line before #CHROM header
+                        print(f"Warning: Unexpected line format before #CHROM header in {vcf_file_path}. Attempting to continue.")
+                        header_line = line # Try processing it as header anyway? Risky.
+                        break
+
+                if header_line is None:
+                    print(f"Warning: #CHROM header line not found in {vcf_file_path}. Skipping.")
+                    fo.close()
+                    continue
+                    
+            columns = header_line.strip().split('\t')
+            if len(columns) < 9:
+                print(f"Warning: #CHROM header line in {vcf_file_path} has fewer than 9 columns. Skipping.")
+                fo.close()
+                continue
+            
         
-        columns = line.strip().split('\t')
-        # get the column to keep in the 
-        # chromosomes
-        chromosomes = CHROMOSOMES
-        
-        if individual_input == 'ALL_SAMPLES':
-            individual = columns[9:]
-            individual_col = [columns.index(indi) for indi in individual]
-        elif individual_input == 'ALL_VARIANTS':
-            individual_col = []
+            # Determine individuals and column indices
             individual = []
-        elif individual_input is None:
-            individual_col = [9]
-            individual = [columns[9]]
-        else:
-            individual = list(dict.fromkeys([i for i in individual_input.split(',') if i])) # remove duplicate and empty values
-            if any([i not in columns for i in individual]):
-                print('some samples were not found in vcf file:', [i for i in individual if i not in columns])
-                return None
-            individual_col = [columns.index(indi) for indi in individual]
-        
-        column_names = ['chr', 'pos', 'ref', 'alt']
-        column_for_samples = []
-        for indi in individual_col:
-            column_for_samples.append(columns[indi] + '__1')
-            column_for_samples.append(columns[indi] + '__2')
-        
-        column_names = column_names + column_for_samples
-        
-        if write_header:
-            fout.write('\t'.join(column_names) + '\n')
-            write_header = False
-        
-        # print(threads)
-        # use single thread is thread set to 1 or file_vcf smaller than 10MB
-        if threads == 1 or os.path.getsize(file_vcf) < 10000000:
-            for line in fo:
-                new_line = processOneLineOfVCF(line, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, chromosomes, file_vcf)
-                fout.write(new_line)
-        else:
-            pool = Pool(threads)
-            if tqdm:
-                to_iter_value = tqdm.tqdm(grouper_it(1000, fo, threads))
+            individual_col = []
+            all_samples = columns[9:]
+
+            if individual_input == 'ALL_SAMPLES':
+                individual = all_samples
+            elif individual_input == 'ALL_VARIANTS':
+                individual = [] # No sample columns needed
+            elif individual_input is None:
+                if all_samples:
+                    individual = [all_samples[0]] # Default to first sample
+                    print(f"No sample specified, using first sample: {individual[0]}")
+                else:
+                    print(f"Warning: No sample specified and no samples found in header of {vcf_file_path}. Processing as ALL_VARIANTS.")
+                    individual = [] # Fallback to no samples
             else:
-                to_iter_value = grouper_it(1000, fo, threads)
-            for ls_lines in to_iter_value:
-                new_lines = pool.starmap(processManyLineOfVCF, [(lines, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, chromosomes, file_vcf) for lines in ls_lines])
-                fout.write(''.join(new_lines))
-            pool.close()
-            pool.join()
-        
-        print('finished converting vcf file:', file_vcf)
-    fout.close()
+                requested_individuals = list(dict.fromkeys([i for i in individual_input.split(',') if i]))
+                individual = [s for s in requested_individuals if s in all_samples]
+                missing = [s for s in requested_individuals if s not in all_samples]
+                if missing:
+                    print(f"Warning: Requested samples not found in {vcf_file_path}: {', '.join(missing)}")
+                if not individual:
+                        print(f"Warning: None of the requested samples found in {vcf_file_path}. Processing as ALL_VARIANTS.")
+
+
+            # Get column indices for the selected individuals
+            individual_col = [columns.index(indi) for indi in individual]
+            
+            
+            # Define output column names (only needs to be done once if consistent across files)
+            if write_header:
+                current_column_for_samples = []
+                for indi_name in individual: # Use determined 'individual' list
+                    current_column_for_samples.append(indi_name + '__1')
+                    current_column_for_samples.append(indi_name + '__2')
+
+                # Check if sample columns changed from previous file (shouldn't if using ALL_SAMPLES)
+                if column_for_samples and column_for_samples != current_column_for_samples:
+                    print("Warning: Sample columns differ between input VCF files. Header might be inconsistent.")
+                    # Decide how to handle: error out, use first header, use union?
+                    # For now, we'll use the first set determined.
+
+                if not column_for_samples: # If first file or consistent
+                    column_for_samples = current_column_for_samples
+
+                output_column_names = ['chr', 'pos', 'ref', 'alt'] + column_for_samples
+                header_string = '\t'.join(output_column_names) + '\n'
+                write_queue.put(header_string) # Send header to writer thread
+                write_header = False # Prevent writing header again
+            
+            # print(threads)
+            # use single thread is thread set to 1 or file_vcf smaller than 10MB
+            if threads == 1 or os.path.getsize(file_vcf) < 10*1024*1024::
+                for line in fo:
+                    new_line = processOneLineOfVCF(line, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, CHROMOSOMES, file_vcf)
+                    if new_line:
+                        write_queue.put(new_line)
+            else:
+                pool = Pool(threads)
+                if tqdm:
+                    to_iter_value = tqdm.tqdm(grouper_it(threads*100, fo, threads))
+                else:
+                    to_iter_value = grouper_it(threads*100, fo, threads)
+                for ls_lines in to_iter_value:
+                    new_lines = pool.starmap(processManyLineOfVCF, [(lines, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, CHROMOSOMES, file_vcf) for lines in ls_lines])
+                    # Put results into the write queue
+                    for result_chunk in new_lines:
+                        if result_chunk: # Only queue if non-empty
+                            write_queue.put(result_chunk)
+                    # fout.write(''.join(new_lines))
+                pool.close()
+                pool.join()
+            
+            print('finished converting vcf file:', file_vcf)
+    finally:
+        # --- Signal writer thread to finish ---
+        write_queue.put(None) # Send sentinel
+        print("Waiting for writer thread to finish...")
+        write_queue.join() # Wait for queue to be empty
+        writer_thread.join() # Wait for thread to terminate
+        fout.close() # Close the output file
+        print("Writer thread finished. Output file closed.")
+
+    
+    # fout.close()
     return column_for_samples
 
 description = '''convert extract mutation information from vcf file
