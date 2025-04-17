@@ -12,7 +12,11 @@ import buildSqlite
 import perChrom
 import sqlite3
 import perChrom
-
+try:
+    import tqdm
+except:
+    print('Cannot import tqdm. Will not use tqdm.')
+    tqdm = False
 # # Global variables
 # con = None
 # df_mutations = None
@@ -211,6 +215,13 @@ def save_mutation_and_proteins(df_transcript3, outprefix):
         if pd.notnull(r['new_AA']) and r['new_AA'] != r['AA_seq']:
             fout.write('>{}\tchanged\n{}\n'.format(r['protein_id_fasta'], r['new_AA']))
     fout.close()
+# Define the wrapper function needed for imap
+def translate_wrapper(args):
+    """Unpacks arguments for translateCDSplusWithMut2"""
+    row_series, mutations_df = args
+    # Assuming perChrom.translateCDSplusWithMut2 exists and works like this
+    return perChrom.translateCDSplusWithMut2(row_series, mutations_df)
+
 
 class PerChrom_sqlite(object):
     """
@@ -292,6 +303,8 @@ class PerChrom_sqlite(object):
                 self.df_mutations['chr'] = chromosome
             elif chromosome.startswith('chr') and chromosome[3:] in chromosome_with_genomicLocs:
                 self.df_mutations['chr'] = chromosome[3:]
+            elif 'chr' + chromosome in chromosome_with_genomicLocs:
+                self.df_mutations['chr'] = 'chr' + chromosome
             else:
                 print(f'warning! chromosome {chromosome} not in file_sqlite')
 
@@ -351,7 +364,16 @@ class PerChrom_sqlite(object):
 
         if cpu_counts > 1:
             pool = Pool(cpu_counts)
-            results = pool.starmap(perChrom.translateCDSplusWithMut2, [[r, df_mutations] for _,r in df_transcript3.iterrows()])
+            starmap_args = [[r, df_mutations] for _,r in df_transcript3.iterrows()]
+            
+            chunk_size = min(200, total_tasks // cpu_counts // 4)
+            total_tasks = df_transcript3.shape[0]
+            # results = pool.starmap(perChrom.translateCDSplusWithMut2, starmap_args, chunksize=100)
+            imap_results = pool.imap(translate_wrapper, starmap_args, chunksize=chunk_size)
+            if tqdm:
+                results = list(tqdm.tqdm(imap_results, total=total_tasks, desc=f"Translating {chromosome}"))
+            else:
+                results = list(imap_results)
             pool.close()
             pool.join()
         else:
