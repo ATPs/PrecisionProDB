@@ -596,6 +596,30 @@ def get_proteins_from_sqlite(file_sqlite, file_output = None):
     conn.close()
 
 
+def get_chromosomes_using(file_sqlite):
+    # get table chromosomes_using from file_sqlite as a dataframe table
+    conn = get_connection(file_sqlite)
+    query = 'SELECT * FROM chromosomes_using'
+    df_chromosomes = pd.read_sql_query(query, conn)
+    conn.close()
+    return df_chromosomes
+
+def get_genomicLocs_chromosomes(file_sqlite):
+    '''get chromosomes with genomcLocs
+    '''
+    # get all table names file file_sqlite which starts with 'genomicLocs'
+    conn = get_connection(file_sqlite)
+    cur = conn.cursor()
+    
+    # Query to get all table names starting with 'genomicLocs'
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'genomicLocs_%'")
+    tables = [row[0] for row in cur.fetchall()]
+    
+    cur.close()
+    conn.close()
+    return [i.replace('genomicLocs_', '') for i in tables ]
+    
+
 description = '''create a sqlite file for PrecisionProDB.'''
 def main():
     
