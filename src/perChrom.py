@@ -129,7 +129,7 @@ def parse_mutation(file_mutations, chromosome=None, columns_to_include=None, col
             df_mutations = pd.read_csv(file_mutations, sep='\t', low_memory=False)
         else:
             print(file_mutations, 'very large file, use readExtraLargeMutationFile')
-            df_mutations = readExtraLargeMutationFile(file_mutations, columns_to_include=columns_to_include, columns_to_drop=columns_to_include, nrows=nrows)
+            df_mutations = readExtraLargeMutationFile(file_mutations, columns_to_include=columns_to_include, columns_to_drop=columns_to_drop, nrows=nrows)
         df_mutations['pos_end'] = df_mutations['pos'] + df_mutations['ref'].str.len() - 1
         df_mutations = df_mutations.sort_values(by='pos')
         if chromosome:
