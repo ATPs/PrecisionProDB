@@ -463,7 +463,8 @@ def tsv2memmap(tsv_file, individuals = None, memmap_file=None, batch_size=100):
     '''
     if memmap_file is None:
         memmap_file = tsv_file + '.memmap'
-        memmap_file_done = tsv_file + '.memmap.done'
+    
+    memmap_file_done = tsv_file + '.memmap.done'
     
     if os.path.exists(memmap_file_done):
         print(f"memmap file '{memmap_file}' already exists, skipping")
