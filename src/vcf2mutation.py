@@ -463,7 +463,12 @@ def tsv2memmap(tsv_file, individuals = None, memmap_file=None, batch_size=100):
     '''
     if memmap_file is None:
         memmap_file = tsv_file + '.memmap'
-        
+        memmap_file_done = tsv_file + '.memmap.done'
+    
+    if os.path.exists(memmap_file_done):
+        print(f"memmap file '{memmap_file}' already exists, skipping")
+        return memmap_file
+    
     if individuals is None:
         tdf = pd.read_csv(tsv_file, sep='\t', nrows=1)
         individuals = [i for i in tdf.columns if i not in ['chr', 'pos', 'ref', 'alt','pos_end']]
@@ -503,6 +508,8 @@ def tsv2memmap(tsv_file, individuals = None, memmap_file=None, batch_size=100):
     mmap.flush()
     del mmap
     print(f"TSV file '{tsv_file}' has been successfully converted to memory-mapped file '{memmap_file}'")
+    open(memmap_file_done, 'w').close()
+    return memmap_file
 
 # --- Writer Function ---
 # --- Writer Function (Corrected) ---
