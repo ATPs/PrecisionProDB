@@ -84,25 +84,56 @@ def get_protein_id_from_df_mutations(df_mutations, file_sqlite, cpu_counts=10):
     
     return combined_results
 
-def convert_df_transcript2_to_df_transcript3_helper(protein_id, df_transcript2, df_mutations, individual, **kargs):
+def convert_df_transcript2_to_df_transcript3_helper(protein_id, df_transcript2, df_mutations, individual, kargs):
     '''
     protein_id is a protein_id in df_transcript2
     for each protein_id, get the mutations in each individual.
     return a list of tuple, each tuple is (tuple of variant_index, individuals with this variant_index joined by ',')
+    
+    If shape and file_memmap are provided in kargs, it means we're dealing with an extra large mutation file
+    where individual data is stored in a memory-mapped file instead of in the DataFrame.
     '''
     mutations = df_transcript2.loc[protein_id]['mutations']
-    tdf_m = df_mutations.loc[mutations]
-    tdc = {}
-    for sample in individual:
-        if sample not in tdf_m.columns:
-            print('warning:', sample, 'not in mutation columns and is ignored! unexpected error may happen!')
-            continue
-        tdf_m_single = tdf_m[tdf_m[sample].apply(is_valid)]
-        variant_index = tuple(tdf_m_single.index)
-        if len(variant_index) > 0:
-            if variant_index not in tdc:
-                tdc[variant_index] = []
-            tdc[variant_index].append(sample)
+    
+    # Check if we're using memory-mapped file for individual data
+    if 'shape' in kargs and 'file_memmap' in kargs:
+        # Using memory-mapped file for individual data
+        shape = kargs['shape']
+        file_memmap = kargs['file_memmap']
+        
+        # Open the memory-mapped file in read mode
+        mmap = np.memmap(file_memmap, dtype='int8', mode='r', shape=shape)
+        
+        # Get the indices of mutations for this protein
+        mutation_indices = mutations
+        
+        tdc = {}
+        for i, sample in enumerate(individual):
+            # For each sample, check which mutations are valid (value is 1)
+            valid_mutations = []
+            for idx in mutation_indices:
+                if idx < mmap.shape[0] and i < mmap.shape[1] and mmap[idx, i] == 1:
+                    valid_mutations.append(idx)
+            
+            variant_index = tuple(valid_mutations)
+            if len(variant_index) > 0:
+                if variant_index not in tdc:
+                    tdc[variant_index] = []
+                tdc[variant_index].append(sample)
+    else:
+        # Using regular DataFrame for individual data
+        tdf_m = df_mutations.loc[mutations]
+        tdc = {}
+        for sample in individual:
+            if sample not in tdf_m.columns:
+                print('warning:', sample, 'not in mutation columns and is ignored! unexpected error may happen!')
+                continue
+            tdf_m_single = tdf_m[tdf_m[sample].apply(is_valid)]
+            variant_index = tuple(tdf_m_single.index)
+            if len(variant_index) > 0:
+                if variant_index not in tdc:
+                    tdc[variant_index] = []
+                tdc[variant_index].append(sample)
     
     tdc = {k:','.join(v) for k,v in tdc.items()}
     return list(tdc.items())
@@ -114,6 +145,8 @@ def convert_df_transcript2_to_df_transcript3(df_transcript2, df_mutations, indiv
     else, group mutations in df_transcript2 by individual. rename index by adding __X, and add column 'individual'
     individual is a list of samples in df_mutations
     
+    If shape and file_memmap are provided in kargs, it means we're dealing with an extra large mutation file
+    where individual data is stored in a memory-mapped file instead of in the DataFrame.
     '''
     if individual is None or individual == '' or individual == 'None' or individual == [] or individual == 'ALL_VARIANTS':
         return df_transcript2
@@ -122,17 +155,20 @@ def convert_df_transcript2_to_df_transcript3(df_transcript2, df_mutations, indiv
         individual = individual
     elif individual == 'ALL_SAMPLES':
         individual = [i for i in df_mutations.columns if i not in ['chr', 'pos', '', 'ref', 'alt', 'pos_end']]
-        print('warning: individual is ALL_SAMPLES, all columns in file_mutations other than chr pos ref alt were used as individuals, which may cause problem. individuals were set as:', individual)
+        if len(individual) < 100:
+            print('warning: individual is ALL_SAMPLES, all columns in file_mutations other than chr pos ref alt were used as individuals, which may cause problem. individuals were set as:', individual)
+        else:
+            print('warning: individual is ALL_SAMPLES, all columns in file_mutations other than chr pos ref alt were used as individuals, which may cause problem. {} individuals were used'.format(len(individual)))
     elif ',' in individual:
         individual = individual.split(',')
     else:
         individual = [individual]
     
     if cpu_counts == 1:
-        results = [convert_df_transcript2_to_df_transcript3_helper(protein_id, df_transcript2, df_mutations, individual) for protein_id in df_transcript2.index]
+        results = [convert_df_transcript2_to_df_transcript3_helper(protein_id, df_transcript2, df_mutations, individual, kargs) for protein_id in df_transcript2.index]
     else:
         pool = Pool(cpu_counts)
-        results = pool.starmap(convert_df_transcript2_to_df_transcript3_helper, [(protein_id, df_transcript2, df_mutations, individual) for protein_id in df_transcript2.index])
+        results = pool.starmap(convert_df_transcript2_to_df_transcript3_helper, [(protein_id, df_transcript2, df_mutations, individual, kargs) for protein_id in df_transcript2.index])
         pool.close()
         pool.join()
     
@@ -227,7 +263,11 @@ class PerChrom_sqlite(object):
             individual = individual
         elif individual == 'ALL_SAMPLES':
             individual = [i for i in df_mutations.columns if i not in ['chr', 'pos', '', 'ref', 'alt', 'pos_end']]
-            print('warning: individual is ALL_SAMPLES, all columns in file_mutations other than chr pos ref alt were used as individuals, which may cause problem. individuals were set as:', individual)
+            if len(individual) < 100:
+                print('warning: individual is ALL_SAMPLES, all columns in file_mutations other than chr pos ref alt were used as individuals, which may cause problem. individuals were set as:', individual)
+            else:
+                print('warning: individual is ALL_SAMPLES, all columns in file_mutations other than chr pos ref alt were used as individuals, which may cause problem. {} individuals were used'.format(len(individual)))
+
         elif ',' in individual:
             individual = individual.split(',')
         elif individual in df_mutations.columns:
@@ -245,6 +285,15 @@ class PerChrom_sqlite(object):
             tsv2memmap(file_mutations, individuals = self.individual, memmap_file=file_mutations + '.memmap')
             self.shape = shape
             self.file_memmap = file_mutations + '.memmap'
+        
+        if chromosome:
+            chromosome_with_genomicLocs = buildSqlite.get_genomicLocs_chromosomes(file_sqlite)
+            if chromosome in chromosome_with_genomicLocs:
+                self.df_mutations['chr'] = chromosome
+            elif chromosome.startswith('chr') and chromosome[3:] in chromosome_with_genomicLocs:
+                self.df_mutations['chr'] = chromosome[3:]
+            else:
+                print(f'warning! chromosome {chromosome} not in file_sqlite')
 
 
 
@@ -291,7 +340,7 @@ class PerChrom_sqlite(object):
                     df_transcript2.at[transcript_id, 'mutations'] = []
                 df_transcript2 = df_transcript2[~df_transcript2.index.isin(set(tdf_special.index))]
 
-        if not self.extra_large_file_mutation
+        if not self.extra_large_file_mutation:
             df_transcript3 = convert_df_transcript2_to_df_transcript3(df_transcript2, df_mutations, individual = individual, cpu_counts=cpu_counts)
         else:
             df_transcript3 = convert_df_transcript2_to_df_transcript3(df_transcript2, df_mutations, individual = individual, cpu_counts=cpu_counts, shape=self.shape, file_memmap = self.file_memmap)
@@ -341,6 +390,8 @@ def main():
     parser.add_argument('-s', '--sample', help='''
                         sample name in the vcf to extract the variant information. default: None, use all variants and do not consider samples.
                         For multiple samples, use "," to join the sample names. For example, "--sample sample1,sample2,sample3".
+                        To use all samples, use "--sample ALL_SAMPLES". 
+                        To use all variants regardless where the variants from, use "--sample ALL_VARIANTS".
                         ''', default=None)
     
     if TEST:
