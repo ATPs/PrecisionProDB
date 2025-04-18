@@ -11,6 +11,8 @@ import queue # Thread-safe queue
 import threading # For the writer thread
 import sqlite3
 import numpy as np
+import sys
+import shutil
 
 try:
     import tqdm
@@ -538,6 +540,139 @@ def writer_job(q, file_handle):
     print("Writer thread finished.") # Debug print
 
 
+    
+def get_header_sample_col(file_vcf,individual_input="ALL_SAMPLES"):
+    '''
+    return the header line based on files_vcf and individual_input
+    file_vcf should be a vcf file
+    return header line and individual_col
+    '''
+    vcf_file_path = file_vcf
+    try:
+        fo = openFile(vcf_file_path)
+    except FileNotFoundError:
+        print(f"Warning: Could not open file {vcf_file_path}. Skipping.")
+        return '', [], None
+    except Exception as e:
+            print(f"Warning: Error opening file {vcf_file_path}: {e}. Skipping.")
+            return '', [], None
+    
+    # Read header lines to find samples
+    header_line = None
+    for line in fo:
+        if line.startswith('##'):
+            continue
+        if line.startswith('#CHROM'):
+            header_line = line
+            break
+        else: # Unexpected line before #CHROM header
+            print(f"Warning: Unexpected line format before #CHROM header in {vcf_file_path}. Attempting to continue.")
+            header_line = line # Try processing it as header anyway? Risky.
+            break
+
+    if header_line is None:
+        print(f"Warning: #CHROM header line not found in {vcf_file_path}. Skipping.")
+        fo.close()
+        return '', [], None
+            
+    columns = header_line.strip().split('\t')
+    if len(columns) < 9:
+        print(f"Warning: #CHROM header line in {vcf_file_path} has fewer than 9 columns. Skipping.")
+        fo.close()
+        return '', [], None
+    
+
+    # Determine individuals and column indices
+    individual = []
+    individual_col = []
+    all_samples = columns[9:]
+
+    if individual_input == 'ALL_SAMPLES':
+        individual = all_samples
+    elif individual_input == 'ALL_VARIANTS':
+        individual = [] # No sample columns needed
+    elif individual_input is None:
+        if all_samples:
+            individual = [all_samples[0]] # Default to first sample
+            print(f"No sample specified, using first sample: {individual[0]}")
+        else:
+            print(f"Warning: No sample specified and no samples found in header of {vcf_file_path}. Processing as ALL_VARIANTS.")
+            individual = [] # Fallback to no samples
+    else:
+        requested_individuals = list(dict.fromkeys([i for i in individual_input.split(',') if i]))
+        individual = [s for s in requested_individuals if s in all_samples]
+        missing = [s for s in requested_individuals if s not in all_samples]
+        if missing:
+            print(f"Warning: Requested samples not found in {vcf_file_path}: {', '.join(missing)}")
+        if not individual:
+                print(f"Warning: None of the requested samples found in {vcf_file_path}. Processing as ALL_VARIANTS.")
+
+
+    # Get column indices for the selected individuals
+    individual_col = [columns.index(indi) for indi in individual]
+    
+    
+    # Define output column names (only needs to be done once if consistent across files)
+    current_column_for_samples = []
+    for indi_name in individual: # Use determined 'individual' list
+        current_column_for_samples.append(indi_name + '__1')
+        current_column_for_samples.append(indi_name + '__2')
+
+    output_column_names = ['chr', 'pos', 'ref', 'alt'] + current_column_for_samples
+    header_string = '\t'.join(output_column_names) + '\n'
+    
+    return header_string, individual_col, fo
+
+def split_large_vcf(file_vcf, output_prefix=None, group_size = 10000):
+    '''
+    '''
+    header_string, individual_col, fo = get_header_sample_col(file_vcf)
+    if not header_string:
+        return []
+    if output_prefix is None:
+        output_prefix = file_vcf + '__split__'
+    
+    individual_col_str = '\t'.join([str(i) for i in individual_col]) + '\n'
+
+    # Read in data
+    ls_files = []
+    for i, chunk in enumerate(grouper_it(group_size, fo, 1)):
+        file_output = f'{output_prefix}.{i}.vcf'
+        ls_files.append(file_output)
+        fo = open(file_output, 'w')
+        fo.write(header_string)
+        fo.write(individual_col_str)
+        fo.write(''.join(chunk[0]))
+        fo.close()
+    return ls_files
+
+def convertVCF2MutationComplexHelper(file_vcf, file_output, header_string, individual_col, filter_PASS = True, chromosome_only = True, info_field = None, info_field_thres=None):
+    '''file_vcf is output from split_large_vcf
+    '''
+    fo = open(file_vcf,'r')
+    header_string = fo.readline()
+    individual_col = [int(i) for i in fo.readline().strip().split('\t')]
+
+    if info_field:
+        try:
+            info_field_thres = float(info_field_thres)
+        except ValueError:
+            print(f"Error: --info_field_thres ('{info_field_thres}') must be a number.")
+            return None # Or raise error
+    
+    fout = open(file_output,'w')
+    fout.write(header_string)
+    for line in fo:
+        new_line = processOneLineOfVCF(line, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, CHROMOSOMES, file_vcf)
+        fout.write(new_line)
+    fout.close()
+    fo.close()
+    return file_output
+
+def convertVCF2MutationComplexHelper_wrapper(args):
+    file_vcf_split, file_vcf_split_processed,header_string, individual_col, filter_PASS,chromosome_only,info_field,info_field_thres = args
+    return convertVCF2MutationComplexHelper(file_vcf_split, file_vcf_split_processed,header_string, individual_col, filter_PASS,chromosome_only,info_field,info_field_thres)
+
 def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL_SAMPLES", filter_PASS = True, chromosome_only = True, info_field = None, info_field_thres=None, threads = 1):
     '''convert vcf file to tsv file. with columns: chr, pos, ref, sample1__1, sample1__2, sample2__1, sample2__2, ..., sampleN__1, sampleN__2 columns
     If individual is None, use the first sample in the vcf file. 
@@ -570,7 +705,13 @@ def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL
         # file_output = file_vcf + '.tsv'
     else:
         file_output = outprefix + '.tsv'
-        
+    
+    # check if file_output is already finished
+    file_output_done = file_output + '.done'
+    if os.path.exists(file_output_done):
+        print(f"Output file '{file_output}' already exists. Skipping.")
+        return open(file_output_done, 'r').read().strip().split()
+    
     if info_field:
         try:
             info_field_thres = float(info_field_thres)
@@ -578,142 +719,76 @@ def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL
             print(f"Error: --info_field_thres ('{info_field_thres}') must be a number.")
             return [] # Or raise error
 
-    # --- Setup Writer Thread ---
     fout = open(file_output, 'w')
-    write_queue = queue.Queue(maxsize=threads * 2) # Buffer size heuristic
-    writer_thread = threading.Thread(target=writer_job, args=(write_queue, fout))
-    writer_thread.start()
-
-
+    dc_header_string_and_other_info = {file_vcf:get_header_sample_col(file_vcf) for file_vcf in files_vcf}
+    dc_header_string_and_other_info = {k:v for k,v in dc_header_string_and_other_info.items() if v[0]}
+    if len(set([i[0] for i in dc_header_string_and_other_info.values()])) != 1:
+        print(f"Error: Different header strings found in {files_vcf}.")
+        return []
+    header_string = list(dc_header_string_and_other_info.values())[0][0]
+    column_for_samples = header_string.strip().split()[4:]
+    fout.write(header_string)
     
-
-    write_header = True
-    column_for_samples = [] # Keep track of sample columns generated
-
-    try:
-        for file_vcf in files_vcf:
-            vcf_file_path = file_vcf
-            print('start converting vcf file:', file_vcf)
-            try:
-                fo = openFile(vcf_file_path)
-            except FileNotFoundError:
-                print(f"Warning: Could not open file {vcf_file_path}. Skipping.")
-                continue
-            except Exception as e:
-                    print(f"Warning: Error opening file {vcf_file_path}: {e}. Skipping.")
-                    continue
-            
-            # Read header lines to find samples
-            header_line = None
-            for line in fo:
-                if line.startswith('##'):
-                    continue
-                if line.startswith('#CHROM'):
-                    header_line = line
-                    break
-                else: # Unexpected line before #CHROM header
-                    print(f"Warning: Unexpected line format before #CHROM header in {vcf_file_path}. Attempting to continue.")
-                    header_line = line # Try processing it as header anyway? Risky.
-                    break
-
-            if header_line is None:
-                print(f"Warning: #CHROM header line not found in {vcf_file_path}. Skipping.")
-                fo.close()
-                continue
-                    
-            columns = header_line.strip().split('\t')
-            if len(columns) < 9:
-                print(f"Warning: #CHROM header line in {vcf_file_path} has fewer than 9 columns. Skipping.")
-                fo.close()
-                continue
-            
+    total_vcf_size = sum([os.path.getsize(file_vcf) for file_vcf in files_vcf])
+    
+    if threads == 1 or total_vcf_size < 10*1024*1024:
+        for file_vcf in dc_header_string_and_other_info:
+            header_string, individual_col, fo = dc_header_string_and_other_info[file_vcf]
+            if tqdm:
+                to_iter = tqdm.tqdm(fo)
+            else:
+                to_iter = fo
+            for line in to_iter:
+                new_line = processOneLineOfVCF(line, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, CHROMOSOMES, file_vcf)
+                if new_line:
+                    fout.write(new_line)
+            print('finish converting vcf file:', file_vcf)
+        fo.close()
         
-            # Determine individuals and column indices
-            individual = []
-            individual_col = []
-            all_samples = columns[9:]
+        return column_for_samples
 
-            if individual_input == 'ALL_SAMPLES':
-                individual = all_samples
-            elif individual_input == 'ALL_VARIANTS':
-                individual = [] # No sample columns needed
-            elif individual_input is None:
-                if all_samples:
-                    individual = [all_samples[0]] # Default to first sample
-                    print(f"No sample specified, using first sample: {individual[0]}")
-                else:
-                    print(f"Warning: No sample specified and no samples found in header of {vcf_file_path}. Processing as ALL_VARIANTS.")
-                    individual = [] # Fallback to no samples
-            else:
-                requested_individuals = list(dict.fromkeys([i for i in individual_input.split(',') if i]))
-                individual = [s for s in requested_individuals if s in all_samples]
-                missing = [s for s in requested_individuals if s not in all_samples]
-                if missing:
-                    print(f"Warning: Requested samples not found in {vcf_file_path}: {', '.join(missing)}")
-                if not individual:
-                        print(f"Warning: None of the requested samples found in {vcf_file_path}. Processing as ALL_VARIANTS.")
+    # use multiple threads
+    print('use multiple threads to convert the vcf files by splitting the vcf files into smaller files')
+    folder_temp = file_output + '_temp'
+    folder_temp_split = os.path.join(folder_temp, 'vcf_split')
 
-
-            # Get column indices for the selected individuals
-            individual_col = [columns.index(indi) for indi in individual]
-            
-            
-            # Define output column names (only needs to be done once if consistent across files)
-            if write_header:
-                current_column_for_samples = []
-                for indi_name in individual: # Use determined 'individual' list
-                    current_column_for_samples.append(indi_name + '__1')
-                    current_column_for_samples.append(indi_name + '__2')
-
-                # Check if sample columns changed from previous file (shouldn't if using ALL_SAMPLES)
-                if column_for_samples and column_for_samples != current_column_for_samples:
-                    print("Warning: Sample columns differ between input VCF files. Header might be inconsistent.")
-                    # Decide how to handle: error out, use first header, use union?
-                    # For now, we'll use the first set determined.
-
-                if not column_for_samples: # If first file or consistent
-                    column_for_samples = current_column_for_samples
-
-                output_column_names = ['chr', 'pos', 'ref', 'alt'] + column_for_samples
-                header_string = '\t'.join(output_column_names) + '\n'
-                write_queue.put(header_string) # Send header to writer thread
-                write_header = False # Prevent writing header again
-            
-            # print(threads)
-            # use single thread is thread set to 1 or file_vcf smaller than 10MB
-            if threads == 1 or os.path.getsize(file_vcf) < 10*1024*1024:
-                for line in fo:
-                    new_line = processOneLineOfVCF(line, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, CHROMOSOMES, file_vcf)
-                    if new_line:
-                        write_queue.put(new_line)
-            else:
-                pool = Pool(threads)
-                if tqdm:
-                    to_iter_value = tqdm.tqdm(grouper_it(threads*100, fo, threads))
-                else:
-                    to_iter_value = grouper_it(threads*100, fo, threads)
-                for ls_lines in to_iter_value:
-                    new_lines = pool.starmap(processManyLineOfVCF, [(lines, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, CHROMOSOMES, file_vcf) for lines in ls_lines])
-                    # Put results into the write queue
-                    for result_chunk in new_lines:
-                        if result_chunk: # Only queue if non-empty
-                            write_queue.put(result_chunk)
-                    # fout.write(''.join(new_lines))
-                pool.close()
-                pool.join()
-            
-            print('finished converting vcf file:', file_vcf)
-    finally:
-        # --- Signal writer thread to finish ---
-        write_queue.put(None) # Send sentinel
-        print("Waiting for writer thread to finish...")
-        write_queue.join() # Wait for queue to be empty
-        writer_thread.join() # Wait for thread to terminate
-        fout.close() # Close the output file
-        print("Writer thread finished. Output file closed.")
-
+    if not os.path.exists(folder_temp_split):
+        os.makedirs(folder_temp_split)
+    pool = Pool(threads)
+    params = []
+    for file_vcf in dc_header_string_and_other_info:
+        params.append([file_vcf, os.path.join(folder_temp_split,os.path.basename(file_vcf)), 10000])
+    files_vcf_split = pool.starmap(split_large_vcf, params, chunksize=1)
+    pool.close()
+    pool.join()
+    print('vcf files were splitted to {} files'.format(len([i for j in files_vcf_split for i in j])))
     
-    # fout.close()
+    pool = Pool(threads)
+    params = []
+    for file_vcf, files_vcf_split_batch in zip(dc_header_string_and_other_info.keys(), files_vcf_split):
+        header_string, individual_col, fo = dc_header_string_and_other_info[file_vcf]
+        for file_vcf_split in files_vcf_split_batch:
+            file_vcf_split_processed = os.path.join(folder_temp, os.path.basename(file_vcf_split))+'processed.tsv'
+            params.append([file_vcf_split, file_vcf_split_processed,header_string, individual_col, filter_PASS,chromosome_only,info_field,info_field_thres])
+    
+    imap_files_vcf_split_processed = pool.imap(convertVCF2MutationComplexHelper_wrapper, params, chunksize=1)
+    if tqdm:
+        files_vcf_split_processed = list(tqdm.tqdm(imap_files_vcf_split_processed, total=len(params), desc=f"vcf converting to tsv"))
+    else:
+        files_vcf_split_processed = list(imap_files_vcf_split_processed)
+    # files_vcf_split_processed = pool.starmap(convertVCF2MutationComplexHelper, params, chunksize=1)
+    pool.close()
+    pool.join()
+    
+    shutil.rmtree(folder_temp_split)
+    for file_vcf_split_processed in files_vcf_split_processed:
+        fo = open(file_vcf_split_processed,'r')
+        fo.readline()
+        fout.write(fo.read())
+
+    shutil.rmtree(folder_temp)
+    fout.close()
+    open(file_output_done, 'w').write('\n'.join(column_for_samples))
     return column_for_samples
 
 description = '''convert extract mutation information from vcf file
