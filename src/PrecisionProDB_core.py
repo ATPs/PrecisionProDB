@@ -396,6 +396,12 @@ class PerGeno(object):
         file_mutations is generated from vcf file, no need to read with pandas or further processing
         '''
         tempfolder = self.tempfolder
+        file_splitMutationByChromosomeLarge_done = os.path.join(tempfolder,'splitMutationByChromosomeLarge.done')
+        if os.path.exists(file_splitMutationByChromosomeLarge_done):
+            print('splitting the mutation file is already finished. use previous results')
+            chromosomes_mutation = open(file_splitMutationByChromosomeLarge_done).read().strip().split('\n')
+            return chromosomes_mutation
+        
         file_mutations = self.file_mutations
         if chromosomes_genome is None:
             chromosomes_genome = self.chromosomes_genome
@@ -421,6 +427,7 @@ class PerGeno(object):
         chromosomes_mutation = list(dc_output.keys())
         
         print('finish splitting the mutation file')
+        open(file_splitMutationByChromosomeLarge_done,'w').write('\n'.join(chromosomes_mutation))
         return chromosomes_mutation
 
     def splitGtfByChromosomes(self,dc_protein2chr):

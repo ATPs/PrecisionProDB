@@ -13,6 +13,7 @@ import buildSqlite
 from PrecisionProDB_core import PerGeno, get_k_new
 import re
 import sqlite3
+from multiprocessing import Pool
 
 # code below for testing the the program
 TEST = False
@@ -86,6 +87,21 @@ def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_ke
     pergeno.chromosomes_genome = chromosomes_genome
     chromosomes_mutation = pergeno.splitMutationByChromosomeLarge(chromosomes_genome_description=chromosomes_genome_description, chromosomes_genome=chromosomes_genome)
 
+    # run tsv2memmap here with multiple threads to save time
+    files_mutation_to_convert = [f'{tempfolder}/{i}.mutation.tsv' for i in chromosomes_mutation]
+    files_mutation_to_convert = [i for i in files_mutation_to_convert if os.path.getsize(i) > 100000000]
+    if len(files_mutation_to_convert) > 0 and threads > 1 and individual !='':
+        if individual == 'ALL_SAMPLES':
+            columns_in_file_mutation = openFile(files_mutation_to_convert[0], 'r').readline().strip().split('\t')
+            individual_for_memmap = [i for i in columns_in_file_mutation if i not in ['chr', 'pos', '', 'ref', 'alt', 'pos_end']]
+        else:
+            individual_for_memmap = individual
+        from vcf2mutation import tsv2memmap
+        pool = Pool(threads)
+        pool.starmap(tsv2memmap, [(i, individual_for_memmap, i +'.memmap') for i in files_mutation_to_convert], chunksize=1)
+        pool.close()
+        pool.join()
+    
     # run runSinglePerChromSqlite
     chromosomes_mutated = [runSinglePerChromSqlite(file_sqlite, f'{tempfolder}/{chromosome}.mutation.tsv', tempfolder, threads, chromosome, datatype, individual) for chromosome in chromosomes_mutation]
     # successful chromosomes
@@ -93,7 +109,7 @@ def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_ke
     # collect mutation annotations
     files_mutAnno = ['{}/{}.aa_mutations.csv'.format(tempfolder, chromosome) for chromosome in chromosomes_mutated]
     file_mutAnno = outprefix + '.pergeno.aa_mutations.csv'
-    df_mutAnno = pd.concat([pd.read_csv(f, sep='\t') for f in files_mutAnno if os.path.exists(f)], ignore_index=True)
+    df_mutAnno = pd.concat([pd.read_csv(f, sep='\t', low_memory=False) for f in files_mutAnno if os.path.exists(f)], ignore_index=True)
     print('total number of proteins with AA mutation:', df_mutAnno.shape[0])
     df_mutAnno.to_csv(file_mutAnno, sep='\t', index=None)
 

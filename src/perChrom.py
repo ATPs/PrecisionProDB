@@ -125,7 +125,7 @@ def parse_mutation(file_mutations, chromosome=None, columns_to_include=None, col
         if chromosome:
             df_mutations['chr'] = chromosome
     else:
-        if os.path.getsize(file_mutations) < 1000000000:
+        if os.path.getsize(file_mutations) < 100000000:
             df_mutations = pd.read_csv(file_mutations, sep='\t', low_memory=False)
         else:
             print(file_mutations, 'very large file, use readExtraLargeMutationFile')

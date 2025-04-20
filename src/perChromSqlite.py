@@ -249,7 +249,7 @@ class PerChrom_sqlite(object):
         # if file_mutation is larger than 1G, only read ['chr', 'pos', 'ref', 'alt']
         if isinstance(self.file_mutations, str):
             if os.path.exists(self.file_mutations):
-                if os.path.getsize(self.file_mutations) > 1000000000:
+                if os.path.getsize(self.file_mutations) > 100000000:
                     self.extra_large_file_mutation = True
         
         if self.extra_large_file_mutation:
@@ -366,8 +366,9 @@ class PerChrom_sqlite(object):
             pool = Pool(cpu_counts)
             starmap_args = [[r, df_mutations] for _,r in df_transcript3.iterrows()]
             
-            chunk_size = min(200, total_tasks // cpu_counts // 4)
             total_tasks = df_transcript3.shape[0]
+            chunk_size = min(200, total_tasks // cpu_counts // 4)
+            
             # results = pool.starmap(perChrom.translateCDSplusWithMut2, starmap_args, chunksize=100)
             imap_results = pool.imap(translate_wrapper, starmap_args, chunksize=chunk_size)
             if tqdm:
