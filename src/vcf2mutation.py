@@ -161,8 +161,10 @@ def getMutationsFromVCF(file_vcf, outprefix = None, individual=None, filter_PASS
             
             if '|' in genotype:
                 GTs = genotype.split('|')
-            else:
+            elif '/' in genotype:
                 GTs = genotype.split('/')
+            else:
+                GTs = [genotype, '.']# some GTs like "GT:AD:DP:GQ:PL  0:3,0:3:99:0,104"
             GTs = [int(e) if e != '.' else 0 for e in GTs]
             alternatives = [reference] + alternatives
             alternative1, alternative2 = alternatives[GTs[0]], alternatives[GTs[1]]
