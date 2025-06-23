@@ -1,9 +1,16 @@
 from setuptools import setup, find_packages
 import os
 folder = os.path.dirname(os.path.abspath(__file__))
+
+# Read version from version file
+def get_version():
+    version_file = os.path.join(folder, 'src', 'version')
+    with open(version_file, 'r') as f:
+        return f.read().strip()
+
 setup(
     name="precisionprodb",  # Your package name
-    version="2.0.2",  # Package version
+    version=get_version(),  # Package version read from src/version file
     # packages=['.',],  # Automatically find sub-packages under `src`
     package_dir={'': 'src'},
     install_requires=[  # Your dependencies
