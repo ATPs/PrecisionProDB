@@ -53,7 +53,7 @@ def main():
     parser.add_argument('--PEFF', help='If set, PEFF format file(s) will be generated. Default: do not generate PEFF file(s).', action='store_true')
     parser.add_argument('--keep_all', help='If set, do not delete files generated during the run', action='store_true')
 
-    parser.add_argument('-S','--sqlite', help='''A path of sqlite file for re-use of annotation info. default '', do not use sqlite. The program will create a sqlite file if the file does not exist. If the file already exists, the program will use data stored in the file. It will cause error if the content in the sqlite file is not as expected. ''', default='', type=str)
+    parser.add_argument('-S','--sqlite', help='''A path of sqlite file for re-use of annotation info. default outprefix + '.sqlite'. The program will create a sqlite file if the file does not exist. If the file already exists, the program will use data stored in the file. It will cause error if the content in the sqlite file is not as expected. To disable sqlite, set to "NONE". ''', default='', type=str)
     parser.add_argument('--info_field', help='fields to use in the INFO column of the vcf file to filter variants. Default None', default = None)
     parser.add_argument('--info_field_thres', help='threhold for the info field. Default None, do not filter any variants. If set "--info_filed AF --info_field_thres 0.01", only keep variants with AF >= 0.01', default = None)
 
@@ -77,6 +77,10 @@ def main():
     keep_all = f.keep_all
     file_sqlite = f.sqlite
     print(f)
+    if file_sqlite == '':
+        file_sqlite = outprefix + '.sqlite'
+    elif file_sqlite == 'NONE':
+        file_sqlite = ''
 
     
     time0 = time.time()
