@@ -355,6 +355,8 @@ def processOneLineOfVCF(line,
     ls_new_line = []
     for alternative_index in range(len(alternatives)):
         alternative = alternatives[alternative_index]
+        if alternative == '*':
+            continue
         ls_alternatives = []
         for GT in GTs:
             for i in GT:
