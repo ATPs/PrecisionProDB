@@ -113,6 +113,23 @@ def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_ke
     print('total number of proteins with AA mutation:', df_mutAnno.shape[0])
     df_mutAnno.to_csv(file_mutAnno, sep='\t', index=None)
 
+    # collect individual information for later use when adding unchanged proteins per individual
+    all_individuals = []
+    if isinstance(individual, str):
+        if individual not in ['', 'None']:
+            all_individuals = [i.strip() for i in individual.split(',') if i.strip()]
+    elif isinstance(individual, (list, tuple)):
+        all_individuals = [i for i in individual if i]
+
+    mutated_samples_by_protein = {}
+    if 'individual' in df_mutAnno.columns:
+        for _, row in df_mutAnno[['protein_id', 'individual']].dropna(subset=['individual']).iterrows():
+            samples = [i.strip() for i in str(row['individual']).split(',') if i.strip()]
+            if not samples:
+                continue
+            mutated_samples_by_protein.setdefault(row['protein_id'], set()).update(samples)
+    use_individual_specific = len(all_individuals) > 0 and len(mutated_samples_by_protein) > 0
+
     # collect protein sequences
     files_proteins_changed = ['{}/{}.mutated_protein.fa'.format(tempfolder, chromosome) for chromosome in chromosomes_mutated]
     file_proteins_changed = outprefix + '.pergeno.protein_changed.fa'
@@ -128,15 +145,29 @@ def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_ke
             if s.description.endswith('\tchanged'):
                 proteins_changed_ids.append(s.id)
                 fout_proteins_changed.write('>{}\n{}\n'.format(s.description, str(s.seq)))
-        
+    
     proteins_changed_ids = set([i.split('__')[0] for i in proteins_changed_ids])
     conn = buildSqlite.get_connection(file_sqlite)
     df_protein_description = pd.read_sql("SELECT * FROM protein_description", conn)
-    df_protein_description = df_protein_description[~ df_protein_description['protein_id_fasta'].isin(proteins_changed_ids)]
-    for _, s in df_protein_description.iterrows():
-        protein_id, protein_description, protein_id_fasta, AA_seq = s['protein_id'], s['protein_description'], s['protein_id_fasta'], s['AA_seq']
-        fout_proteins_all.write('>{}\tunchanged\n{}\n'.format(protein_description, str(AA_seq)))
-    
+
+    if not use_individual_specific:
+        df_protein_description = df_protein_description[~ df_protein_description['protein_id_fasta'].isin(proteins_changed_ids)]
+        for _, s in df_protein_description.iterrows():
+            protein_description, AA_seq = s['protein_description'], s['AA_seq']
+            fout_proteins_all.write('>{}\tunchanged\n{}\n'.format(protein_description, str(AA_seq)))
+    else:
+        for _, s in df_protein_description.iterrows():
+            protein_description, protein_id_fasta, AA_seq = s['protein_description'], s['protein_id_fasta'], s['AA_seq']
+            mutated_samples = mutated_samples_by_protein.get(protein_id_fasta, set())
+            if len(mutated_samples) == 0:
+                fout_proteins_all.write('>{}\tunchanged\n{}\n'.format(protein_description, str(AA_seq)))
+                continue
+            if len(mutated_samples) >= len(all_individuals):
+                continue
+            samples_to_write = [i for i in all_individuals if i not in mutated_samples]
+            header = '{}\tunchanged\t{}'.format(protein_id_fasta, ','.join(samples_to_write))
+            fout_proteins_all.write('>{}\n{}\n'.format(header, str(AA_seq)))
+
     conn.close()
     fout_proteins_changed.close()
     fout_proteins_all.close()
