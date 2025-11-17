@@ -165,7 +165,8 @@ def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_ke
             if len(mutated_samples) >= len(all_individuals):
                 continue
             samples_to_write = [i for i in all_individuals if i not in mutated_samples]
-            header = '{}\tunchanged\t{}'.format(protein_id_fasta, ','.join(samples_to_write))
+            # header = '{}\tunchanged\t{}'.format(protein_id_fasta, ','.join(samples_to_write))
+            header = '{}\tunchanged'.format(protein_id_fasta)
             fout_proteins_all.write('>{}\n{}\n'.format(header, str(AA_seq)))
 
     conn.close()
