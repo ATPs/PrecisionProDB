@@ -17,6 +17,8 @@ try:
 except:
     print('Cannot import tqdm. Will not use tqdm.')
     tqdm = False
+
+_MEMMAP_CACHE = {}
 # # Global variables
 # con = None
 # df_mutations = None
@@ -88,42 +90,54 @@ def get_protein_id_from_df_mutations(df_mutations, file_sqlite, cpu_counts=10):
     
     return combined_results
 
+def _load_memmap(file_memmap, shape):
+    """Cache numpy.memmap instances per-process to avoid reopening the file repeatedly."""
+    global _MEMMAP_CACHE
+    cache_key = (file_memmap, shape)
+    if cache_key not in _MEMMAP_CACHE:
+        _MEMMAP_CACHE[cache_key] = np.memmap(file_memmap, dtype='int8', mode='r', shape=shape)
+    return _MEMMAP_CACHE[cache_key]
+
+
 def convert_df_transcript2_to_df_transcript3_helper(protein_id, df_transcript2, df_mutations, individual, kargs):
     '''
-    protein_id is a protein_id in df_transcript2
-    for each protein_id, get the mutations in each individual.
-    return a list of tuple, each tuple is (tuple of variant_index, individuals with this variant_index joined by ',')
-    
-    If shape and file_memmap are provided in kargs, it means we're dealing with an extra large mutation file
-    where individual data is stored in a memory-mapped file instead of in the DataFrame.
+    Convert mutation membership for a single protein into grouped variant patterns.
+
+    The function inspects all variants linked to the provided protein and determines,
+    for every individual, which subset of those variants is carried. Individuals sharing
+    the same variant combination are collapsed into a single entry so downstream
+    translation only needs to be executed once per unique pattern. When a memory-mapped
+    allele matrix is available, the lookups are vectorized to avoid per-sample Python
+    loops.
     '''
     mutations = df_transcript2.loc[protein_id]['mutations']
     
     # Check if we're using memory-mapped file for individual data
     if 'shape' in kargs and 'file_memmap' in kargs:
-        # Using memory-mapped file for individual data
         shape = kargs['shape']
         file_memmap = kargs['file_memmap']
-        
-        # Open the memory-mapped file in read mode
-        mmap = np.memmap(file_memmap, dtype='int8', mode='r', shape=shape)
-        
-        # Get the indices of mutations for this protein
-        mutation_indices = mutations
-        
+        mmap = _load_memmap(file_memmap, shape)
+        mutation_indices = np.array(mutations, dtype=int)
+        if mutation_indices.size == 0:
+            return []
+        allele_block = mmap[mutation_indices, :]
+        allele_block = allele_block if allele_block.ndim == 2 else allele_block.reshape(1, -1)
+        # Locate every (variant, sample) pair where the allele is present.
+        presence_coords = np.argwhere(allele_block == 1)
+        if presence_coords.size == 0:
+            return []
+        sample_to_variants = {}
+        for variant_pos, sample_idx in presence_coords:
+            variant_idx = mutation_indices[variant_pos]
+            sample_to_variants.setdefault(sample_idx, []).append(variant_idx)
         tdc = {}
-        for i, sample in enumerate(individual):
-            # For each sample, check which mutations are valid (value is 1)
-            valid_mutations = []
-            for idx in mutation_indices:
-                if idx < mmap.shape[0] and i < mmap.shape[1] and mmap[idx, i] == 1:
-                    valid_mutations.append(idx)
-            
-            variant_index = tuple(valid_mutations)
-            if len(variant_index) > 0:
-                if variant_index not in tdc:
-                    tdc[variant_index] = []
-                tdc[variant_index].append(sample)
+        for sample_idx, variant_list in sample_to_variants.items():
+            if not variant_list:
+                continue
+            variant_index = tuple(sorted(variant_list))
+            if len(variant_index) == 0:
+                continue
+            tdc.setdefault(variant_index, []).append(individual[sample_idx])
     else:
         # Using regular DataFrame for individual data
         tdf_m = df_mutations.loc[mutations]
@@ -236,7 +250,8 @@ class PerChrom_sqlite(object):
                     outprefix,
                     datatype,
                     chromosome,
-                    individual = None
+                    individual = None,
+                    force_memmap = False
                 ):
         self.file_sqlite = file_sqlite # genome file location
         self.file_mutations = file_mutations # mutation file location
@@ -245,9 +260,12 @@ class PerChrom_sqlite(object):
         self.datatype = datatype # input datatype, could be GENCODE_GTF, GENCODE_GFF3, RefSeq or gtf
         self.chromosome = chromosome # chromosome name
         self.extra_large_file_mutation = False # whether the mutation file is larger than 1G
+        self.force_memmap = force_memmap
         
         # if file_mutation is larger than 1G, only read ['chr', 'pos', 'ref', 'alt']
+        file_memmap_path = None
         if isinstance(self.file_mutations, str):
+            file_memmap_path = self.file_mutations + '.memmap'
             if os.path.exists(self.file_mutations):
                 if os.path.getsize(self.file_mutations) > 100000000:
                     self.extra_large_file_mutation = True
@@ -289,11 +307,19 @@ class PerChrom_sqlite(object):
         
         self.individual = individual
         
+        # Determine whether we already built memmap data for this file or if it should be forced.
+        memmap_exists = bool(file_memmap_path and os.path.exists(file_memmap_path))
+        if not self.individual:
+            self.extra_large_file_mutation = False
+        else:
+            self.extra_large_file_mutation = bool(self.individual) and (self.extra_large_file_mutation or memmap_exists or self.force_memmap)
+        
         if self.extra_large_file_mutation:
             self.df_mutations = perChrom.parse_mutation(file_mutations, columns_to_include=['chr', 'pos', 'ref', 'alt'])
             from vcf2mutation import tsv2memmap
             shape = (self.df_mutations.shape[0], len(self.individual))
-            tsv2memmap(file_mutations, individuals = self.individual, memmap_file=file_mutations + '.memmap')
+            if not memmap_exists:
+                tsv2memmap(file_mutations, individuals = self.individual, memmap_file=file_mutations + '.memmap')
             self.shape = shape
             self.file_memmap = file_mutations + '.memmap'
         

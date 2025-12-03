@@ -7,6 +7,7 @@ import pickle
 from perChrom import PerChrom
 import shutil
 import re
+from array import array
 
 def get_k_new(k, chromosomes_genome, chromosomes_genome_description):
     '''k is chromosome name. return chromosome name based on chromosomes_genome, chromosomes_genome_description
@@ -391,9 +392,12 @@ class PerGeno(object):
         print('finish splitting the mutation file')
         return chromosomes_mutation
 
-    def splitMutationByChromosomeLarge(self, chromosomes_genome_description=None, chromosomes_genome=None):
+    def splitMutationByChromosomeLarge(self, chromosomes_genome_description=None, chromosomes_genome=None, individual_columns=None, enable_memmap=False):
         '''split mutation file based on chromosomes
         file_mutations is generated from vcf file, no need to read with pandas or further processing
+        individual_columns is an optional list of sample columns that should be written
+        to memmap files while the TSV is being split. enable_memmap toggles this streamed
+        writer to avoid re-reading the large TSV with pandas later on.
         '''
         tempfolder = self.tempfolder
         file_splitMutationByChromosomeLarge_done = os.path.join(tempfolder,'splitMutationByChromosomeLarge.done')
@@ -409,10 +413,25 @@ class PerGeno(object):
             chromosomes_genome_description = self.chromosomes_genome_description
         
         dc_output = {}
+        memmap_writers = {}
+        sample_column_indices = []
         fo = openFile(file_mutations)
         for line in fo:
             break
         header = line
+        header_columns = header.strip().split('\t')
+        if enable_memmap:
+            if individual_columns:
+                name_to_index = {name: idx for idx, name in enumerate(header_columns)}
+                sample_column_indices = [name_to_index[name] for name in individual_columns if name in name_to_index]
+                if len(sample_column_indices) != len(individual_columns):
+                    missing = set(individual_columns) - set(name_to_index)
+                    if missing:
+                        print('warning: columns not found for memmap writing:', ','.join(missing))
+            else:
+                base_columns = {'chr', 'pos', 'ref', 'alt', 'pos_end'}
+                # fallback: treat every column beyond the required fields as sample genotype
+                sample_column_indices = [idx for idx, name in enumerate(header_columns) if name not in base_columns]
         for line in fo:
             k = line.split('\t', maxsplit=1)[0]
             k_new = get_k_new(k, chromosomes_genome, chromosomes_genome_description)
@@ -421,14 +440,64 @@ class PerGeno(object):
                 dc_output[k_new] = open(tf,'w')
                 dc_output[k_new].write(header)
             dc_output[k_new].write(line)
+            if enable_memmap and sample_column_indices:
+                if k_new not in memmap_writers:
+                    memmap_filename = tf + '.memmap'
+                    memmap_writers[k_new] = _ChromosomeMemmapWriter(memmap_filename, len(sample_column_indices))
+                line_values = line.strip().split('\t')
+                sample_values = [line_values[idx] if idx < len(line_values) else '0' for idx in sample_column_indices]
+                memmap_writers[k_new].add_row(sample_values)
         
+        fo.close()
         for k_new in dc_output:
             dc_output[k_new].close()
+        for writer in memmap_writers.values():
+            writer.finalize()
         chromosomes_mutation = list(dc_output.keys())
         
         print('finish splitting the mutation file')
         open(file_splitMutationByChromosomeLarge_done,'w').write('\n'.join(chromosomes_mutation))
         return chromosomes_mutation
+
+class _ChromosomeMemmapWriter:
+    """Stream sample matrices into byte-aligned files for later memmap usage."""
+
+    def __init__(self, filename, n_cols):
+        """
+        Args:
+            filename (str): Destination path for the raw binary matrix.
+            n_cols (int): Number of sample columns stored per row.
+        """
+        self.filename = filename
+        self.n_cols = n_cols
+        self.handle = open(filename, 'wb')
+        self.rows = 0
+
+    def add_row(self, values):
+        """
+        Append a single row of sample indicators to the binary file.
+
+        Args:
+            values (Iterable[str]): Raw string values from the TSV columns.
+        """
+        row_array = array(
+            'b',
+            (1 if value not in ('', '0', '0.0', '.', 'False') else 0 for value in values)
+        )
+        if len(row_array) != self.n_cols:
+            raise ValueError(f'mismatched memmap width: expected {self.n_cols}, got {len(row_array)}')
+        row_array.tofile(self.handle)
+        self.rows += 1
+
+    def finalize(self):
+        """Close file handle and create the companion .done flag."""
+        self.handle.close()
+        open(self.filename + '.done', 'w').close()
+
+    def __del__(self):
+        """Ensure file handle closes if finalize is not called explicitly."""
+        if not self.handle.closed:
+            self.handle.close()
 
     def splitGtfByChromosomes(self,dc_protein2chr):
         '''split gtf file based on chromosome. only keep proteins in file_protein

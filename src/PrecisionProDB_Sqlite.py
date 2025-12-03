@@ -39,7 +39,7 @@ if TEST:
     file_sqlite = '/XCLabServer002_fastIO/examples/GENCODE/GENCODE.tsv.sqlite'
 
 
-def runSinglePerChromSqlite(file_sqlite, file_mutations, tempfolder, threads, chromosome, datatype, individual):
+def runSinglePerChromSqlite(file_sqlite, file_mutations, tempfolder, threads, chromosome, datatype, individual, force_memmap=False):
     '''
     run PerChrom_sqlite for a single chromosome
     '''
@@ -51,7 +51,8 @@ def runSinglePerChromSqlite(file_sqlite, file_mutations, tempfolder, threads, ch
                     outprefix = outprefix,
                     datatype = datatype,
                     chromosome = chromosome,
-                    individual = individual)
+                    individual = individual,
+                    force_memmap = force_memmap)
     print('run perchrom_sqlite for chromosome', chromosome)
     # perchrom_sqlite.run_perChrom()
     # print('finished running perchrom_sqlite for chromosome:', chromosome)
@@ -65,7 +66,7 @@ def runSinglePerChromSqlite(file_sqlite, file_mutations, tempfolder, threads, ch
         return None
 
 
-def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_keyword, datatype, keep_all, individual, chromosomes_genome, chromosomes_genome_description, file_gtf):
+def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_keyword, datatype, keep_all, individual, chromosomes_genome, chromosomes_genome_description, file_gtf, force_memmap=False):
     '''
     '''
     # split file_mutations by chromosome
@@ -83,27 +84,43 @@ def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_ke
     
     if individual == 'ALL_VARIANTS':
         individual = ''
+    # only force memmap when sample information is retained
+    use_force_memmap = force_memmap and individual not in ['', None]
     tempfolder = pergeno.tempfolder
     pergeno.chromosomes_genome = chromosomes_genome
-    chromosomes_mutation = pergeno.splitMutationByChromosomeLarge(chromosomes_genome_description=chromosomes_genome_description, chromosomes_genome=chromosomes_genome)
+    individual_columns = None
+    if isinstance(individual, str) and individual not in ['', 'None', 'ALL_SAMPLES']:
+        individual_columns = [i.strip() for i in individual.split(',') if i.strip()]
+    elif isinstance(individual, (list, tuple)):
+        individual_columns = [i for i in individual if i]
+    chromosomes_mutation = pergeno.splitMutationByChromosomeLarge(
+        chromosomes_genome_description=chromosomes_genome_description,
+        chromosomes_genome=chromosomes_genome,
+        individual_columns=individual_columns,
+        enable_memmap=use_force_memmap
+    )
 
     # run tsv2memmap here with multiple threads to save time
     files_mutation_to_convert = [f'{tempfolder}/{i}.mutation.tsv' for i in chromosomes_mutation]
     files_mutation_to_convert = [i for i in files_mutation_to_convert if os.path.getsize(i) > 100000000]
-    if len(files_mutation_to_convert) > 0 and threads > 1 and individual !='':
-        if individual == 'ALL_SAMPLES':
-            columns_in_file_mutation = openFile(files_mutation_to_convert[0], 'r').readline().strip().split('\t')
-            individual_for_memmap = [i for i in columns_in_file_mutation if i not in ['chr', 'pos', '', 'ref', 'alt', 'pos_end']]
+    if len(files_mutation_to_convert) > 0 and threads > 1 and individual !='' and not use_force_memmap:
+        files_mutation_to_convert = [i for i in files_mutation_to_convert if not os.path.exists(i + '.memmap')]
+        if len(files_mutation_to_convert) == 0:
+            print('memmap files already present for large chromosomes, skip regeneration.')
         else:
-            individual_for_memmap = individual
-        from vcf2mutation import tsv2memmap
-        pool = Pool(threads)
-        pool.starmap(tsv2memmap, [(i, individual_for_memmap, i +'.memmap') for i in files_mutation_to_convert], chunksize=1)
-        pool.close()
-        pool.join()
+            if individual == 'ALL_SAMPLES':
+                columns_in_file_mutation = openFile(files_mutation_to_convert[0], 'r').readline().strip().split('\t')
+                individual_for_memmap = [i for i in columns_in_file_mutation if i not in ['chr', 'pos', '', 'ref', 'alt', 'pos_end']]
+            else:
+                individual_for_memmap = individual
+            from vcf2mutation import tsv2memmap
+            pool = Pool(threads)
+            pool.starmap(tsv2memmap, [(i, individual_for_memmap, i +'.memmap') for i in files_mutation_to_convert], chunksize=1)
+            pool.close()
+            pool.join()
     
     # run runSinglePerChromSqlite
-    chromosomes_mutated = [runSinglePerChromSqlite(file_sqlite, f'{tempfolder}/{chromosome}.mutation.tsv', tempfolder, threads, chromosome, datatype, individual) for chromosome in chromosomes_mutation]
+    chromosomes_mutated = [runSinglePerChromSqlite(file_sqlite, f'{tempfolder}/{chromosome}.mutation.tsv', tempfolder, threads, chromosome, datatype, individual, force_memmap=use_force_memmap) for chromosome in chromosomes_mutation]
     # successful chromosomes
     chromosomes_mutated = [e for e in chromosomes_mutated if e is not None]
     # collect mutation annotations
@@ -115,8 +132,22 @@ def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_ke
 
     # collect individual information for later use when adding unchanged proteins per individual
     all_individuals = []
+    base_columns = {'chr', 'pos', 'ref', 'alt', 'pos_end'}
     if isinstance(individual, str):
-        if individual not in ['', 'None']:
+        if individual == 'ALL_SAMPLES':
+            # Derive the actual sample columns from one of the split mutation files so
+            # unchanged proteins can still be emitted when some individuals remain ref-only.
+            sample_header_file = None
+            for chromosome in chromosomes_mutation:
+                candidate = f'{tempfolder}/{chromosome}.mutation.tsv'
+                if os.path.exists(candidate):
+                    sample_header_file = candidate
+                    break
+            if sample_header_file:
+                with openFile(sample_header_file, 'r') as fo:
+                    header_columns = fo.readline().strip().split('\t')
+                all_individuals = [col for col in header_columns if col not in base_columns]
+        elif individual not in ['', 'None']:
             all_individuals = [i.strip() for i in individual.split(',') if i.strip()]
     elif isinstance(individual, (list, tuple)):
         all_individuals = [i for i in individual if i]
@@ -190,6 +221,7 @@ def runPerChomSqlite_vcf(file_mutations, file_sqlite, threads, outprefix, dataty
     # get two mutation files from vcf file
     print('start extracting mutation file from the vcf input')
     outprefix_vcf = outprefix + '.vcf2mutation'
+    force_memmap = (individual == 'ALL_SAMPLES')
     individual = convertVCF2MutationComplex(file_vcf = file_mutations, outprefix = outprefix_vcf, individual_input=individual, filter_PASS = filter_PASS, chromosome_only = chromosome_only, info_field = info_field, info_field_thres=info_field_thres, threads = threads)
     individual = ','.join(individual)
     print('finished extracting mutations from the vcf file')
@@ -208,7 +240,8 @@ def runPerChomSqlite_vcf(file_mutations, file_sqlite, threads, outprefix, dataty
                      individual, 
                      chromosomes_genome, 
                      chromosomes_genome_description, 
-                     file_gtf
+                     file_gtf,
+                     force_memmap=force_memmap
                      )
     
 
@@ -368,7 +401,8 @@ def main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protei
             individual=individual,
             chromosomes_genome=chromosomes_genome,
             chromosomes_genome_description=chromosomes_genome_description,
-            file_gtf=file_gtf
+            file_gtf=file_gtf,
+            force_memmap=(individual == 'ALL_SAMPLES')
             )
 
 
