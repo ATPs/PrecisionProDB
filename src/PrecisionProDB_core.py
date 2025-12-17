@@ -9,6 +9,47 @@ import shutil
 import re
 from array import array
 
+
+class _ChromosomeMemmapWriter:
+    """Stream sample matrices into byte-aligned files for later memmap usage."""
+
+    def __init__(self, filename, n_cols):
+        """
+        Args:
+            filename (str): Destination path for the raw binary matrix.
+            n_cols (int): Number of sample columns stored per row.
+        """
+        self.filename = filename
+        self.n_cols = n_cols
+        self.handle = open(filename, 'wb')
+        self.rows = 0
+
+    def add_row(self, values):
+        """
+        Append a single row of sample indicators to the binary file.
+
+        Args:
+            values (Iterable[str]): Raw string values from the TSV columns.
+        """
+        row_array = array(
+            'b',
+            (1 if value not in ('', '0', '0.0', '.', 'False') else 0 for value in values)
+        )
+        if len(row_array) != self.n_cols:
+            raise ValueError(f'mismatched memmap width: expected {self.n_cols}, got {len(row_array)}')
+        row_array.tofile(self.handle)
+        self.rows += 1
+
+    def finalize(self):
+        """Close file handle and create the companion .done flag."""
+        self.handle.close()
+        open(self.filename + '.done', 'w').close()
+
+    def __del__(self):
+        """Ensure file handle closes if finalize is not called explicitly."""
+        if not self.handle.closed:
+            self.handle.close()
+
 def get_k_new(k, chromosomes_genome, chromosomes_genome_description):
     '''k is chromosome name. return chromosome name based on chromosomes_genome, chromosomes_genome_description
     deal with RefSeq IDs
@@ -458,46 +499,6 @@ class PerGeno(object):
         print('finish splitting the mutation file')
         open(file_splitMutationByChromosomeLarge_done,'w').write('\n'.join(chromosomes_mutation))
         return chromosomes_mutation
-
-class _ChromosomeMemmapWriter:
-    """Stream sample matrices into byte-aligned files for later memmap usage."""
-
-    def __init__(self, filename, n_cols):
-        """
-        Args:
-            filename (str): Destination path for the raw binary matrix.
-            n_cols (int): Number of sample columns stored per row.
-        """
-        self.filename = filename
-        self.n_cols = n_cols
-        self.handle = open(filename, 'wb')
-        self.rows = 0
-
-    def add_row(self, values):
-        """
-        Append a single row of sample indicators to the binary file.
-
-        Args:
-            values (Iterable[str]): Raw string values from the TSV columns.
-        """
-        row_array = array(
-            'b',
-            (1 if value not in ('', '0', '0.0', '.', 'False') else 0 for value in values)
-        )
-        if len(row_array) != self.n_cols:
-            raise ValueError(f'mismatched memmap width: expected {self.n_cols}, got {len(row_array)}')
-        row_array.tofile(self.handle)
-        self.rows += 1
-
-    def finalize(self):
-        """Close file handle and create the companion .done flag."""
-        self.handle.close()
-        open(self.filename + '.done', 'w').close()
-
-    def __del__(self):
-        """Ensure file handle closes if finalize is not called explicitly."""
-        if not self.handle.closed:
-            self.handle.close()
 
     def splitGtfByChromosomes(self,dc_protein2chr):
         '''split gtf file based on chromosome. only keep proteins in file_protein
