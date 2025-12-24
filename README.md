@@ -42,7 +42,7 @@ PrecisionProDB is [now available here](https://precisionprodb.genes.fun/) for fa
   - [Further comparison](#further-comparison)
 - [Benchmark](#Benchmark)
 - [PrecisionProDB\_references](#precisionprodb_references)
-- [Workflows](#Workflows)
+- [Workflow](#Workflow)
 - [Contact Information](#contact-information)
 
 
