@@ -489,6 +489,9 @@ def create_sqlite(file_sqlite, file_genome, file_gtf, file_protein, outprefix, d
     - protein_keyword: Keyword for filtering protein sequences.
     - keep_all: Boolean to indicate if all data should be kept.
     '''
+    if os.path.exists(file_sqlite):
+        print(f'sqlite file "{file_sqlite}" already exists; remove it to avoid duplicated records')
+        os.remove(file_sqlite)
 
     pergeno = PerGeno(
         file_genome = file_genome, 
