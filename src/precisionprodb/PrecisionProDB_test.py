@@ -40,23 +40,24 @@ def get_cmd_to_run(key_input, key_variant, sqlite_key, output_test, dc_variant, 
     datatype = dc_inputs[key_input]['datatype']
     file_sqlite = f'{output_test}/{key_input}/{key_input}.sqlite'
     output = os.path.join(folder_work, f'{key_input}.{key_variant}.{sqlite_key}')
+    script_folder = os.path.join(path_of_precisionprodb, 'src', 'precisionprodb')
     
     print(f'running test with key_input: {key_input}, key_variant: {key_variant}, sqlite_key: {sqlite_key}')
     if sqlite_key == 'no_sqlite':
         print("Running test: without use sqlite file")
-        cmd = f'cd {folder_work} &&  python {path_of_precisionprodb}/src/PrecisionProDB.py -m {file_mutation} -g {file_genome} -p {file_protein} -f {file_gtf} -o {output} -a {datatype} --PEFF {cmd_UniProt}'
+        cmd = f'cd {folder_work} &&  python {script_folder}/PrecisionProDB.py -m {file_mutation} -g {file_genome} -p {file_protein} -f {file_gtf} -o {output} -a {datatype} --PEFF {cmd_UniProt}'
     elif sqlite_key == 'sqlite_one_step':
         print("Running test: use SQLite file as intermediate file")
         if os.path.exists(file_sqlite):
             print(f"{file_sqlite} exists. Removing it.")
             os.remove(file_sqlite)
-        cmd = f'cd {folder_work} &&  python {path_of_precisionprodb}/src/PrecisionProDB.py -m {file_mutation} -g {file_genome} -p {file_protein} -f {file_gtf} -o {output} -a {datatype} --PEFF {cmd_UniProt} -S {file_sqlite}'
+        cmd = f'cd {folder_work} &&  python {script_folder}/PrecisionProDB.py -m {file_mutation} -g {file_genome} -p {file_protein} -f {file_gtf} -o {output} -a {datatype} --PEFF {cmd_UniProt} -S {file_sqlite}'
     elif sqlite_key == 'sqlite_two_step':
         print("Running test: Generate SQLite file in advance and use SQLite")
         if os.path.exists(file_sqlite):
             print(f"{file_sqlite} exists. Removing it.")
             os.remove(file_sqlite)
-        cmd = f'cd {folder_work} && python {path_of_precisionprodb}/src/buildSqlite.py -S {file_sqlite} -g {file_genome} -p {file_protein} -f {file_gtf}  -a {datatype} && python {path_of_precisionprodb}/src/PrecisionProDB.py -m {file_mutation}  -o {output} -a {datatype} --PEFF {cmd_UniProt} -S {file_sqlite}'
+        cmd = f'cd {folder_work} && python {script_folder}/buildSqlite.py -S {file_sqlite} -g {file_genome} -p {file_protein} -f {file_gtf}  -a {datatype} && python {script_folder}/PrecisionProDB.py -m {file_mutation}  -o {output} -a {datatype} --PEFF {cmd_UniProt} -S {file_sqlite}'
     
     return cmd
 
@@ -88,7 +89,7 @@ def main():
     Make sure Python is in your PATH
 
     Options:
-        -s PATH_OF_PRECISIONPRODB  Path to PrecisionProDB. Will use PATH_OF_PRECISIONPRODB/src/ to find the scripts
+        -s PATH_OF_PRECISIONPRODB  Path to PrecisionProDB. Will use PATH_OF_PRECISIONPRODB/src/precisionprodb/ to find the scripts
                                 and PATH_OF_PRECISIONPRODB/examples to find the test input files. if not set, will be determined based on the PrecisionProDB_test.py file. 
         -o OUTPUT_TEST             Path to store the output test results. If not set, will use PATH_OF_PRECISIONPRODB/test_output
     """
@@ -104,7 +105,7 @@ def main():
         args = parser.parse_args()
 
     path_of_precisionprodb = args.src
-    path_of_precisionprodb = (path_of_precisionprodb if path_of_precisionprodb else os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    path_of_precisionprodb = (path_of_precisionprodb if path_of_precisionprodb else os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     output_test = (
         args.output if args.output else os.path.join(path_of_precisionprodb, "test_output")
     )
@@ -164,7 +165,6 @@ def main():
 
 if __name__ == '__main__':
     main()
-
 
 
 

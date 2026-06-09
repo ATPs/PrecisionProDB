@@ -4,14 +4,19 @@ import gzip
 import os
 import time
 import pickle
-from perChrom import PerChrom
 import shutil
 import re
 import sys
-from PrecisionProDB_core import PerGeno
 import sqlite3
 import numpy as np
 from multiprocessing import Pool
+
+if __package__:
+    from .PrecisionProDB_core import PerGeno
+    from .perChrom import PerChrom
+else:
+    from PrecisionProDB_core import PerGeno
+    from perChrom import PerChrom
 
 TEST = False
 # TEST = True

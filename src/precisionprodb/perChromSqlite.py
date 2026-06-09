@@ -6,12 +6,15 @@ import numpy as np
 from multiprocessing import Pool
 import os
 import time
-import perChrom
 import re
-import buildSqlite
-import perChrom
 import sqlite3
-import perChrom
+
+if __package__:
+    from . import buildSqlite
+    from . import perChrom
+else:
+    import buildSqlite
+    import perChrom
 try:
     import tqdm
 except:
@@ -316,7 +319,10 @@ class PerChrom_sqlite(object):
         
         if self.extra_large_file_mutation:
             self.df_mutations = perChrom.parse_mutation(file_mutations, columns_to_include=['chr', 'pos', 'ref', 'alt'])
-            from vcf2mutation import tsv2memmap
+            if __package__:
+                from .vcf2mutation import tsv2memmap
+            else:
+                from vcf2mutation import tsv2memmap
             shape = (self.df_mutations.shape[0], len(self.individual))
             if not memmap_exists:
                 tsv2memmap(file_mutations, individuals = self.individual, memmap_file=file_mutations + '.memmap')

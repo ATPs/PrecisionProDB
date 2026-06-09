@@ -11,7 +11,7 @@ https://github.com/ATPs/PrecisionProDB/wiki/Outputs-of-PrecisionProDB
 cd $PATH_OF_PRECISONPRODB
 cd examples
 
-python ../src/PrecisionProDB.py -m gnomAD.variant.txt.gz -g ./RefSeq/RefSeq.genome.fa.gz -p ./RefSeq/RefSeq.protein.fa.gz -f ./RefSeq/RefSeq.gtf.gz -o ./RefSeq/RefSeq.tsv -a RefSeq --PEFF
+python ../src/precisionprodb/PrecisionProDB.py -m gnomAD.variant.txt.gz -g ./RefSeq/RefSeq.genome.fa.gz -p ./RefSeq/RefSeq.protein.fa.gz -f ./RefSeq/RefSeq.gtf.gz -o ./RefSeq/RefSeq.tsv -a RefSeq --PEFF
 
 # compress files to save disk space
 gzip ./RefSeq/RefSeq.tsv*
@@ -31,7 +31,7 @@ The output files are
 cd $PATH_OF_PRECISONPRODB
 cd examples
 
-python ../src/PrecisionProDB.py -m celline.vcf.gz -g ./RefSeq/RefSeq.genome.fa.gz -p ./RefSeq/RefSeq.protein.fa.gz -f ./RefSeq/RefSeq.gtf.gz -o ./RefSeq/RefSeq.vcf -a RefSeq --PEFF
+python ../src/precisionprodb/PrecisionProDB.py -m celline.vcf.gz -g ./RefSeq/RefSeq.genome.fa.gz -p ./RefSeq/RefSeq.protein.fa.gz -f ./RefSeq/RefSeq.gtf.gz -o ./RefSeq/RefSeq.vcf -a RefSeq --PEFF
 
 # compress files to save disk space
 gzip ./RefSeq/RefSeq.vcf*

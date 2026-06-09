@@ -11,7 +11,7 @@ https://github.com/ATPs/PrecisionProDB/wiki/Outputs-of-PrecisionProDB
 cd $PATH_OF_PRECISONPRODB
 cd examples
 
-python ../src/PrecisionProDB.py -m gnomAD.variant.txt.gz -g ./Ensembl/Ensembl.genome.fa.gz -p ./Ensembl/Ensembl.protein.fa.gz -f ./Ensembl/Ensembl.gtf.gz -o ./Ensembl/Ensembl.tsv -a Ensembl_GTF --PEFF
+python ../src/precisionprodb/PrecisionProDB.py -m gnomAD.variant.txt.gz -g ./Ensembl/Ensembl.genome.fa.gz -p ./Ensembl/Ensembl.protein.fa.gz -f ./Ensembl/Ensembl.gtf.gz -o ./Ensembl/Ensembl.tsv -a Ensembl_GTF --PEFF
 
 # compress files to save disk space
 gzip ./Ensembl/Ensembl.tsv*
@@ -31,7 +31,7 @@ The output files are
 cd $PATH_OF_PRECISONPRODB
 cd examples
 
-python ../src/PrecisionProDB.py -m celline.vcf.gz -g ./Ensembl/Ensembl.genome.fa.gz -p ./Ensembl/Ensembl.protein.fa.gz -f ./Ensembl/Ensembl.gtf.gz -o ./Ensembl/Ensembl.vcf -a Ensembl_GTF --PEFF
+python ../src/precisionprodb/PrecisionProDB.py -m celline.vcf.gz -g ./Ensembl/Ensembl.genome.fa.gz -p ./Ensembl/Ensembl.protein.fa.gz -f ./Ensembl/Ensembl.gtf.gz -o ./Ensembl/Ensembl.vcf -a Ensembl_GTF --PEFF
 
 # compress files to save disk space
 gzip ./Ensembl/Ensembl.vcf*

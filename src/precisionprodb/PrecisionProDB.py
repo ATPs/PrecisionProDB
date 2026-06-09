@@ -1,11 +1,18 @@
-from PrecisionProDB_core import PerGeno
-from PrecisionProDB_vcf import runPerGenoVCF
 import os
-import downloadHuman
 import time
 import sys
 import re
-import buildSqlite
+
+if __package__:
+    from . import buildSqlite
+    from . import downloadHuman
+    from .PrecisionProDB_core import PerGeno
+    from .PrecisionProDB_vcf import runPerGenoVCF
+else:
+    import buildSqlite
+    import downloadHuman
+    from PrecisionProDB_core import PerGeno
+    from PrecisionProDB_vcf import runPerGenoVCF
 
 def get_version():
     """Read version from version file"""
@@ -179,7 +186,10 @@ def main():
             pergeno.runPerChom()
     else:
         # use Sqlite
-        import PrecisionProDB_Sqlite
+        if __package__:
+            from . import PrecisionProDB_Sqlite
+        else:
+            import PrecisionProDB_Sqlite
         print('using sqlite database to speed up')
         PrecisionProDB_Sqlite.main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite, info_field = f.info_field, info_field_thres = f.info_field_thres)
 
@@ -197,12 +207,18 @@ def main():
                 buildSqlite.get_proteins_from_sqlite(file_sqlite, file_output = file_protein)
 
             print('try to extract Uniprot proteins from Ensembl models')
-            import extractMutatedUniprot
+            if __package__:
+                from . import extractMutatedUniprot
+            else:
+                import extractMutatedUniprot
             extractMutatedUniprot.extractMutatedUniprot(files_uniprot=files_uniprot, files_ref=file_protein, files_alt=outprefix + '.pergeno.protein_all.fa', outprefix=outprefix, length_min = uniprot_min_len)
 
         # generate PEFF output file
         if f.PEFF:
-            import generatePEFFoutput
+            if __package__:
+                from . import generatePEFFoutput
+            else:
+                import generatePEFFoutput
             generatePEFFoutput.generatePEFFoutput(file_protein = file_protein, file_mutation = outprefix + '.pergeno.aa_mutations.csv', file_out = outprefix + '.pergeno.protein_PEFF.fa', TEST=False, file_sqlite = file_sqlite)
 
             if download == 'UNIPROT':

@@ -11,7 +11,7 @@ https://github.com/ATPs/PrecisionProDB/wiki/Outputs-of-PrecisionProDB
 cd $PATH_OF_PRECISONPRODB
 cd examples
 
-python ../src/PrecisionProDB.py -m gnomAD.variant.txt.gz -g ./GENCODE/GENCODE.genome.fa.gz -p ./GENCODE/GENCODE.protein.fa.gz -f ./GENCODE/GENCODE.gtf.gz -o ./GENCODE/GENCODE.tsv -a GENCODE_GTF --PEFF
+python ../src/precisionprodb/PrecisionProDB.py -m gnomAD.variant.txt.gz -g ./GENCODE/GENCODE.genome.fa.gz -p ./GENCODE/GENCODE.protein.fa.gz -f ./GENCODE/GENCODE.gtf.gz -o ./GENCODE/GENCODE.tsv -a GENCODE_GTF --PEFF
 
 # compress files to save disk space
 gzip ./GENCODE/GENCODE.tsv*
@@ -31,7 +31,7 @@ The output files are
 cd $PATH_OF_PRECISONPRODB
 cd examples
 
-python ../src/PrecisionProDB.py -m celline.vcf.gz -g ./GENCODE/GENCODE.genome.fa.gz -p ./GENCODE/GENCODE.protein.fa.gz -f ./GENCODE/GENCODE.gtf.gz -o ./GENCODE/GENCODE.vcf -a GENCODE_GTF --PEFF
+python ../src/precisionprodb/PrecisionProDB.py -m celline.vcf.gz -g ./GENCODE/GENCODE.genome.fa.gz -p ./GENCODE/GENCODE.protein.fa.gz -f ./GENCODE/GENCODE.gtf.gz -o ./GENCODE/GENCODE.vcf -a GENCODE_GTF --PEFF
 
 # compress files to save disk space
 gzip ./GENCODE/GENCODE.vcf*

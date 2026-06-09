@@ -13,7 +13,7 @@ For UniProt models, PrecisonProDB will run for Ensembl models, and then do a mat
 cd $PATH_OF_PRECISONPRODB
 cd examples
 
-python ../src/PrecisionProDB.py -m gnomAD.variant.txt.gz -g ./Ensembl/Ensembl.genome.fa.gz -p ./Ensembl/Ensembl.protein.fa.gz -f ./Ensembl/Ensembl.gtf.gz -o ./UniProt/UniProt.tsv -a Ensembl_GTF --PEFF -U ./UniProt/UniProt.protein.fa.gz -D Uniprot
+python ../src/precisionprodb/PrecisionProDB.py -m gnomAD.variant.txt.gz -g ./Ensembl/Ensembl.genome.fa.gz -p ./Ensembl/Ensembl.protein.fa.gz -f ./Ensembl/Ensembl.gtf.gz -o ./UniProt/UniProt.tsv -a Ensembl_GTF --PEFF -U ./UniProt/UniProt.protein.fa.gz -D Uniprot
 
 # compress files to save disk space
 gzip ./UniProt/UniProt.tsv*
@@ -42,7 +42,7 @@ Add additionally
 cd $PATH_OF_PRECISONPRODB
 cd examples
 
-python ../src/PrecisionProDB.py -m celline.vcf.gz -g ./Ensembl/Ensembl.genome.fa.gz -p ./Ensembl/Ensembl.protein.fa.gz -f ./Ensembl/Ensembl.gtf.gz -o ./UniProt/UniProt.vcf -a Ensembl_GTF --PEFF -U ./UniProt/UniProt.protein.fa.gz -D Uniprot
+python ../src/precisionprodb/PrecisionProDB.py -m celline.vcf.gz -g ./Ensembl/Ensembl.genome.fa.gz -p ./Ensembl/Ensembl.protein.fa.gz -f ./Ensembl/Ensembl.gtf.gz -o ./UniProt/UniProt.vcf -a Ensembl_GTF --PEFF -U ./UniProt/UniProt.protein.fa.gz -D Uniprot
 
 # compress files to save disk space
 gzip ./UniProt/UniProt.vcf*

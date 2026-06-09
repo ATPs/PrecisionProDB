@@ -64,7 +64,7 @@ https://github.com/ATPs/PrecisionProDB/wiki/Outputs-of-PrecisionProDB
 cd $PATH_OF_PRECISONPRODB
 cd examples
 
-python ../src/PrecisionProDB.py -m gnomAD.variant.txt.gz -g ./TransDecoder/TransDecoder.genome.fa.gz -p ./TransDecoder/TransDecoder.transcripts.fa.transdecoder.pep.gz -f ./TransDecoder/TransDecoder.transcripts.fa.transdecoder.genome.gff3.gz -o ./TransDecoder/TransDecoder.tsv -a gtf --PEFF
+python ../src/precisionprodb/PrecisionProDB.py -m gnomAD.variant.txt.gz -g ./TransDecoder/TransDecoder.genome.fa.gz -p ./TransDecoder/TransDecoder.transcripts.fa.transdecoder.pep.gz -f ./TransDecoder/TransDecoder.transcripts.fa.transdecoder.genome.gff3.gz -o ./TransDecoder/TransDecoder.tsv -a gtf --PEFF
 
 # compress files to save disk space
 gzip ./TransDecoder/TransDecoder.tsv*
@@ -84,7 +84,7 @@ The output files are
 cd $PATH_OF_PRECISONPRODB
 cd examples
 
-python ../src/PrecisionProDB.py -m celline.vcf.gz -g ./TransDecoder/TransDecoder.genome.fa.gz -p ./TransDecoder/TransDecoder.transcripts.fa.transdecoder.pep.gz -f ./TransDecoder/TransDecoder.transcripts.fa.transdecoder.genome.gff3.gz -o ./TransDecoder/TransDecoder.vcf -a gtf --PEFF
+python ../src/precisionprodb/PrecisionProDB.py -m celline.vcf.gz -g ./TransDecoder/TransDecoder.genome.fa.gz -p ./TransDecoder/TransDecoder.transcripts.fa.transdecoder.pep.gz -f ./TransDecoder/TransDecoder.transcripts.fa.transdecoder.genome.gff3.gz -o ./TransDecoder/TransDecoder.vcf -a gtf --PEFF
 
 # compress files to save disk space
 gzip ./TransDecoder/TransDecoder.vcf*

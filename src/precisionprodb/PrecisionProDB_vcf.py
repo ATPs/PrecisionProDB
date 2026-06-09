@@ -2,8 +2,13 @@ import pandas as pd
 from Bio import SeqIO
 import gzip
 import os
-from PrecisionProDB_core import PerGeno
-from vcf2mutation import getMutationsFromVCF
+
+if __package__:
+    from .PrecisionProDB_core import PerGeno
+    from .vcf2mutation import getMutationsFromVCF
+else:
+    from PrecisionProDB_core import PerGeno
+    from vcf2mutation import getMutationsFromVCF
 
 def openFile(filename):
     '''open text or gzipped text file

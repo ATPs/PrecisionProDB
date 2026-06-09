@@ -37,7 +37,7 @@ https://github.com/ATPs/PrecisionProDB/wiki/Outputs-of-PrecisionProDB
 ```bash
 cd $PATH_OF_PRECISONPRODB
 cd examples
-python ../src/PrecisionProDB.py -m gnomAD.variant.txt.gz -D Ensembl -o ./PREFIX.tsv -a Ensembl_GTF --PEFF \
+python ../src/precisionprodb/PrecisionProDB.py -m gnomAD.variant.txt.gz -D Ensembl -o ./PREFIX.tsv -a Ensembl_GTF --PEFF \
                     -S path_to_file_sqlite
 
 ```
@@ -49,7 +49,7 @@ file `path_to_file_sqlite` can be build in advance with the following command.
 
 ```bash
 cd $PATH_OF_PRECISONPRODB
-python ./src/buildSqlite.py  -g GRCh38.p14.genome.fa.gz \
+python ./src/precisionprodb/buildSqlite.py  -g GRCh38.p14.genome.fa.gz \
                     -p gencode.v47.pc_translations.fa.gz \
                     -f gencode.v47.chr_patch_hapl_scaff.annotation.gtf.gz \
                     -o GENCODE.tsv.buildSqlite \
@@ -62,7 +62,7 @@ python ./src/buildSqlite.py  -g GRCh38.p14.genome.fa.gz \
 ```bash
 cd $PATH_OF_PRECISONPRODB
 cd examples
-python ../src/PrecisionProDB.py -m gnomAD.variant.txt.gz -D Ensembl -o ./PREFIX.tsv -a Ensembl_GTF --PEFF
+python ../src/precisionprodb/PrecisionProDB.py -m gnomAD.variant.txt.gz -D Ensembl -o ./PREFIX.tsv -a Ensembl_GTF --PEFF
 
 ```
 Here `--PEFF` means the PEFF option is enabled, and a result protein in [PEFF](http://www.psidev.info/peff) format with `VariantSimple` annotations will be generated.
@@ -82,7 +82,7 @@ Output files
 ```
 cd $PATH_OF_PRECISONPRODB
 cd examples
-python ../src/PrecisionProDB.py -m celline.vcf.gz -D Ensembl -o ./PREFIX.vcf -a Ensembl_GTF --PEFF
+python ../src/precisionprodb/PrecisionProDB.py -m celline.vcf.gz -D Ensembl -o ./PREFIX.vcf -a Ensembl_GTF --PEFF
 
 ```
 Output files:
@@ -111,7 +111,7 @@ These files should be used for downstream analysis.
 ```Python
 cd $PATH_OF_PRECISONPRODB
 
-python ./src/PrecisionProDB.py \
+python ./src/precisionprodb/PrecisionProDB.py \
         -m chr1-942451-T-C,1-6253878-C-T,1-2194700-C-G,1-1719406-G-A \
         -o ./test_output/Ensembl/str/sqlite_two_step/Ensembl.str.sqlite_two_step \
         -a Ensembl_GTF --PEFF -t 4 \
@@ -132,9 +132,9 @@ Since the data is in the same format like RefSeq, we tested the command below an
 ```Python
 cd $PATH_OF_PRECISONPRODB
 
-python ./src/downloadHuman.py -d CHM13 -o precisionprodb
+python ./src/precisionprodb/downloadHuman.py -d CHM13 -o precisionprodb
 
-python ./src/PrecisionProDB.py \
+python ./src/precisionprodb/PrecisionProDB.py \
         -g precisionprodb/GCF_009914755.1_T2T-CHM13v2.0_genomic.fna.gz \
         -p precisionprodb/GCF_009914755.1_T2T-CHM13v2.0_protein.faa.gz \
         -t 12 \
@@ -149,7 +149,7 @@ python ./src/PrecisionProDB.py \
 to get tsv file from the vcf file, you can use the vcf2mutation.py script
 ```
 cd $PATH_OF_PRECISONPRODB
-python ./src/vcf2mutation.py -h
+python ./src/precisionprodb/vcf2mutation.py -h
 
 usage: vcf2mutation [-h] -i FILE_VCF [-o OUTPREFIX] [-s SAMPLE]
                     [-F] [-A]

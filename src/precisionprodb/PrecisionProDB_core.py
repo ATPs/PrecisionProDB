@@ -4,10 +4,14 @@ import gzip
 import os
 import time
 import pickle
-from perChrom import PerChrom
 import shutil
 import re
 from array import array
+
+if __package__:
+    from .perChrom import PerChrom
+else:
+    from perChrom import PerChrom
 
 
 class _ChromosomeMemmapWriter:

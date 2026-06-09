@@ -4,16 +4,23 @@ import gzip
 import os
 import time
 import pickle
-import perChrom
 import shutil
 import re
 import sys
-import perChromSqlite
-import buildSqlite
-from PrecisionProDB_core import PerGeno, get_k_new
 import re
 import sqlite3
 from multiprocessing import Pool
+
+if __package__:
+    from . import buildSqlite
+    from . import perChrom
+    from . import perChromSqlite
+    from .PrecisionProDB_core import PerGeno, get_k_new
+else:
+    import buildSqlite
+    import perChrom
+    import perChromSqlite
+    from PrecisionProDB_core import PerGeno, get_k_new
 
 # code below for testing the the program
 TEST = False
@@ -113,7 +120,10 @@ def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_ke
                 individual_for_memmap = [i for i in columns_in_file_mutation if i not in ['chr', 'pos', '', 'ref', 'alt', 'pos_end']]
             else:
                 individual_for_memmap = individual
-            from vcf2mutation import tsv2memmap
+            if __package__:
+                from .vcf2mutation import tsv2memmap
+            else:
+                from vcf2mutation import tsv2memmap
             pool = Pool(threads)
             pool.starmap(tsv2memmap, [(i, individual_for_memmap, i +'.memmap') for i in files_mutation_to_convert], chunksize=1)
             pool.close()
@@ -216,8 +226,12 @@ def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_ke
 def runPerChomSqlite_vcf(file_mutations, file_sqlite, threads, outprefix, datatype, protein_keyword, keep_all, individual, chromosome_only, filter_PASS, chromosomes_genome, chromosomes_genome_description, file_gtf, info_field = None, info_field_thres=None):
     '''
     '''
-    from vcf2mutation import convertVCF2MutationComplex
-    from PrecisionProDB_vcf import readProtein2DF, openFile
+    if __package__:
+        from .PrecisionProDB_vcf import readProtein2DF, openFile
+        from .vcf2mutation import convertVCF2MutationComplex
+    else:
+        from PrecisionProDB_vcf import readProtein2DF, openFile
+        from vcf2mutation import convertVCF2MutationComplex
     # get two mutation files from vcf file
     print('start extracting mutation file from the vcf input')
     outprefix_vcf = outprefix + '.vcf2mutation'
