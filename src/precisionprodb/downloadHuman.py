@@ -1,6 +1,35 @@
 from ftplib import FTP
 import os
 import re
+import urllib.request
+
+def read_url(url):
+    last_error = None
+    for i in range(3):
+        try:
+            with urllib.request.urlopen(url, timeout=30) as response:
+                return response.read().decode('utf-8', errors='ignore')
+        except Exception as e:
+            last_error = e
+    raise last_error
+
+def getEnsemblLatestHttps():
+    '''return urls of files from the latest Ensembl release over HTTPS
+    '''
+    base_url = 'https://ftp.ensembl.org/pub/'
+    html = read_url(base_url)
+    releases = [int(e) for e in re.findall(r'href="release-(\d+)/"', html)]
+    if len(releases) == 0:
+        raise ValueError('cannot find Ensembl release folders from HTTPS')
+    version = str(max(releases))
+    print('Ensembl, the latest release is', version)
+
+    folder_base = base_url + 'release-' + version
+    url_genome = folder_base + '/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz'
+    url_GTF = folder_base + '/gtf/homo_sapiens/Homo_sapiens.GRCh38.' + version + '.gtf.gz'
+    url_protein = folder_base + '/fasta/homo_sapiens/pep/Homo_sapiens.GRCh38.pep.all.fa.gz'
+
+    return url_genome, url_GTF, url_protein
 
 def getGENCODElatest():
     '''return urls of files from the latest release version of GENCODE
@@ -112,24 +141,27 @@ def getEnsemblLatest():
     '''return urls of files from the latest release version of Ensembl
     '''
     ftp_url = 'ftp.ensembl.org'
-    ftp = FTP(ftp_url)
-    ftp.login()
-    folder_genome = '/pub/current_fasta/homo_sapiens/dna/'
-    folder_GTF = '/pub/current_gtf/homo_sapiens/'
-    folder_protein = '/pub/current_fasta/homo_sapiens/pep/'
+    try:
+        ftp = FTP(ftp_url, timeout=30)
+        ftp.login()
+        folder_genome = '/pub/current_fasta/homo_sapiens/dna/'
+        folder_GTF = '/pub/current_gtf/homo_sapiens/'
+        folder_protein = '/pub/current_fasta/homo_sapiens/pep/'
 
-    files_genome = ftp.nlst(folder_genome)
-    files_GTF = ftp.nlst(folder_GTF)
-    files_protein = ftp.nlst(folder_protein)
+        files_genome = ftp.nlst(folder_genome)
+        files_GTF = ftp.nlst(folder_GTF)
+        files_protein = ftp.nlst(folder_protein)
 
-    url_genome = 'ftp://' + ftp_url + [e for e in files_genome if re.findall(f'/Homo_sapiens.GRCh\\d*.dna.primary_assembly.fa.gz',e)][0]
-    url_GTF = 'ftp://' + ftp_url + [e for e in files_GTF if re.findall(f'Homo_sapiens.GRCh\\d*.\\d*.gtf.gz',e)][0]
-    url_protein = 'ftp://' + ftp_url + [e for e in files_protein if re.findall(f'Homo_sapiens.GRCh\\d*.pep.all.fa.gz',e)][0]
+        url_genome = 'ftp://' + ftp_url + [e for e in files_genome if re.findall(f'/Homo_sapiens.GRCh\\d*.dna.primary_assembly.fa.gz',e)][0]
+        url_GTF = 'ftp://' + ftp_url + [e for e in files_GTF if re.findall(f'Homo_sapiens.GRCh\\d*.\\d*.gtf.gz',e)][0]
+        url_protein = 'ftp://' + ftp_url + [e for e in files_protein if re.findall(f'Homo_sapiens.GRCh\\d*.pep.all.fa.gz',e)][0]
 
-    version = os.path.basename(url_GTF).split('.')[2]
-    print('Ensembl, the latest release is', version)
-
-    return url_genome, url_GTF, url_protein
+        version = os.path.basename(url_GTF).split('.')[2]
+        print('Ensembl, the latest release is', version)
+        return url_genome, url_GTF, url_protein
+    except Exception as e:
+        print('Ensembl FTP failed, try HTTPS:', e)
+        return getEnsemblLatestHttps()
 
 def getUniprotLatest():
     '''return urls of files of latest Uniprot human sequences
@@ -168,24 +200,28 @@ def downloadFile2folder(url, workfolder):
     '''
     download the file from url to workfolder. print url if cannot download
     '''
-    try:
-        # basename = os.path.basename(url)
-        # if os.path.exists(os.path.join(workfolder, basename)):
-        #     print(basename, 'already downloaded in folder', workfolder, 'and will skip')
-        #     return 0
-        a = os.system(f'cd {workfolder} && wget -c --retry-connrefused --waitretry=2 --read-timeout=40 --timeout=15 -t 20 {url}')
-        # if not linux system, try to download with python lib
-        if a != 0:
-            import urllib 
-            urllib.request.urlretrieve(url, os.path.join(workfolder, os.path.basename(url)))
-    except:
-        print(url, 'cannot be downloaded, try to download yourself! Check the https://github.com/ATPs/PrecisionProDB for information. Use the latest version or contact the authors!')
-        exit()
-    # check if the file is downloaded sucessfully
-    basename = os.path.basename(url)
-    if not os.path.exists(os.path.join(workfolder, basename)):
-        print(url, 'cannot be downloaded, try to download yourself! Check the https://github.com/ATPs/PrecisionProDB for information. Use the latest version or contact the authors!')
-        exit()
+    urls_to_try = [url]
+    if url.startswith('ftp://'):
+        urls_to_try.append('https://' + url[len('ftp://'):])
+    for url_to_download in urls_to_try:
+        try:
+            # basename = os.path.basename(url_to_download)
+            # if os.path.exists(os.path.join(workfolder, basename)):
+            #     print(basename, 'already downloaded in folder', workfolder, 'and will skip')
+            #     return 0
+            a = os.system(f'cd {workfolder} && wget -c --retry-connrefused --waitretry=2 --read-timeout=40 --timeout=15 -t 20 {url_to_download}')
+            # if not linux system, try to download with python lib
+            if a != 0:
+                urllib.request.urlretrieve(url_to_download, os.path.join(workfolder, os.path.basename(url_to_download)))
+            # check if the file is downloaded sucessfully
+            basename = os.path.basename(url_to_download)
+            if os.path.exists(os.path.join(workfolder, basename)):
+                return 0
+        except Exception:
+            pass
+        print(url_to_download, 'cannot be downloaded, try next url.')
+    print(url, 'cannot be downloaded, try to download yourself! Check the https://github.com/ATPs/PrecisionProDB for information. Use the latest version or contact the authors!')
+    exit()
 
 def download(datatype, workfolder='.'):
     '''download genome, GTF, protein sequence of {datatype} and store files in {workfolder}

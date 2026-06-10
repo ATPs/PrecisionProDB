@@ -122,7 +122,9 @@ def main():
                 else:
                     print('download is', download, 'which is not possible...')
         else:
-            if file_genome != '' and file_gtf != '' and file_protein != '' and files_uniprot != '':
+            reference_files_ready = file_genome != '' and file_gtf != '' and file_protein != ''
+            sqlite_reference_ready = file_sqlite != '' and os.path.exists(file_sqlite)
+            if files_uniprot != '' and (reference_files_ready or sqlite_reference_ready):
                 print('download already finished for', download)
                 pass
             else:
