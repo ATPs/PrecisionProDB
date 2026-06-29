@@ -83,6 +83,73 @@ def create_build_indexes(con, chromosomes):
     finally:
         cur.close()
 
+def get_build_worker_count(threads, chromosomes):
+    if len(chromosomes) <= 1:
+        return 1
+    if threads is None or threads < 1:
+        threads = os.cpu_count() or 1
+    return max(1, min(8, int(threads), len(chromosomes)))
+
+def get_payload_file(payload_folder, chromosome):
+    prefix = sanitize_identifier_fragment(chromosome, max_length=80)
+    suffix = hashlib.md5(str(chromosome).encode('utf-8')).hexdigest()[:8]
+    return os.path.join(payload_folder, f'{prefix}_{suffix}.pickle')
+
+def make_chromosome_sqlite_payload(df_transcript2, chromosome):
+    df_protein_description = df_transcript2[[i for i in df_transcript2.columns if i not in ['CDSloc']]].copy()
+    df_protein_description['genomicLocs'] = df_protein_description['genomicLocs'].astype(str)
+    df_protein_description = df_protein_description.reset_index()
+
+    df_CDSloc = df_transcript2[['CDSloc']].copy()
+    df_CDSloc = df_CDSloc.explode('CDSloc')
+    df_CDSloc['CDSloc_start'] = df_CDSloc['CDSloc'].str[0] + 1 # 1-based
+    df_CDSloc['CDSloc_end'] = df_CDSloc['CDSloc'].str[1]
+    df_CDSloc = df_CDSloc.reset_index()
+    df_CDSloc['seqname'] = chromosome
+    del df_CDSloc['CDSloc']
+
+    df_genomicLocs = df_transcript2[['genomicLocs']].copy()
+    df_genomicLocs = df_genomicLocs.explode('genomicLocs')
+    df_genomicLocs['genomicLocs_start'] = df_genomicLocs['genomicLocs'].str[0] + 1 # 1-based
+    df_genomicLocs['genomicLocs_end'] = df_genomicLocs['genomicLocs'].str[1]
+    df_genomicLocs = df_genomicLocs.reset_index()
+    df_genomicLocs['seqname'] = chromosome
+    del df_genomicLocs['genomicLocs']
+
+    return {
+        'protein_description': df_protein_description,
+        'CDSloc': df_CDSloc,
+        'genomicLocs': df_genomicLocs,
+    }
+
+def build_chromosome_sqlite_payload(args):
+    chromosome, tempfolder, outprefix, datatype, payload_folder = args
+    started_at = time.time()
+    fchr_genome = os.path.join(tempfolder, chromosome + '.genome.fa')
+    fchr_gtf = os.path.join(tempfolder, chromosome + '.gtf')
+    fchr_protein = os.path.join(tempfolder, chromosome + '.proteins.fa')
+    perchrom = PerChrom(file_genome = fchr_genome,
+        file_gtf = fchr_gtf,
+        file_mutations = '',
+        file_protein = fchr_protein,
+        threads = 1,
+        outprefix = outprefix,
+        datatype = datatype,
+        chromosome = chromosome)
+
+    payload = make_chromosome_sqlite_payload(perchrom.df_transcript2, chromosome)
+    payload_file = get_payload_file(payload_folder, chromosome)
+    with open(payload_file, 'wb') as f:
+        pickle.dump(payload, f, protocol=4)
+
+    row_counts = {key: value.shape[0] for key, value in payload.items()}
+    return {
+        'chromosome': chromosome,
+        'payload_file': payload_file,
+        'row_counts': row_counts,
+        'elapsed_seconds': time.time() - started_at,
+    }
+
 def insert_chromosomes_using(con, chromosomes_using, chromosomes_genome_description, commit=True):
     '''
     Store the list of chromosomes in the table "chromosomes_using".
@@ -581,6 +648,44 @@ def create_sqlite(file_sqlite, file_genome, file_gtf, file_protein, outprefix, d
     chromosomes_genome = pergeno.chromosomes_genome # all chromosomes in genome
     chromosomes_genome_description = pergeno.chromosomes_genome_description
 
+    payload_folder = os.path.join(pergeno.tempfolder, 'buildSqlite_payloads')
+    os.makedirs(payload_folder, exist_ok=True)
+    worker_count = get_build_worker_count(threads, chromosomes)
+    print(f'building chromosome sqlite payloads with {worker_count} workers')
+    payload_args = [
+        (chromosome, pergeno.tempfolder, outprefix, pergeno.datatype, payload_folder)
+        for chromosome in chromosomes
+    ]
+    payload_infos = []
+    if worker_count > 1:
+        pool = Pool(worker_count)
+        try:
+            for payload_info in pool.imap_unordered(build_chromosome_sqlite_payload, payload_args, chunksize=1):
+                payload_infos.append(payload_info)
+                print(
+                    'finished building sqlite payload for chromosome {} in {:.2f}s'.format(
+                        payload_info['chromosome'],
+                        payload_info['elapsed_seconds'],
+                    )
+                )
+            pool.close()
+            pool.join()
+        except Exception:
+            pool.terminate()
+            pool.join()
+            raise
+    else:
+        for payload_arg in payload_args:
+            payload_info = build_chromosome_sqlite_payload(payload_arg)
+            payload_infos.append(payload_info)
+            print(
+                'finished building sqlite payload for chromosome {} in {:.2f}s'.format(
+                    payload_info['chromosome'],
+                    payload_info['elapsed_seconds'],
+                )
+            )
+    payload_infos_by_chromosome = {payload_info['chromosome']: payload_info for payload_info in payload_infos}
+
     # create a sqlite3 file
     con = sqlite3.connect(file_sqlite)
     try:
@@ -595,46 +700,13 @@ def create_sqlite(file_sqlite, file_genome, file_gtf, file_protein, outprefix, d
             commit=False,
         )
 
-        # run get df_transcript2
         for chromosome in chromosomes:
-            fchr_genome = os.path.join(pergeno.tempfolder, chromosome + '.genome.fa')
-            fchr_gtf = os.path.join(pergeno.tempfolder, chromosome + '.gtf')
-            fchr_protein = os.path.join(pergeno.tempfolder, chromosome + '.proteins.fa')
-            perchrom = PerChrom(file_genome = fchr_genome,
-                file_gtf = fchr_gtf,
-                file_mutations = '',
-                file_protein = fchr_protein,
-                threads = threads,
-                outprefix = outprefix,
-                datatype = pergeno.datatype,
-                chromosome = chromosome)
-            
-            df_transcript2 = perchrom.df_transcript2
-            # store protein_description, AA_seq to table protein_description
-            df_protein_description = df_transcript2[[i for i in df_transcript2.columns if i not in ['CDSloc']]].copy()
-            df_protein_description['genomicLocs'] = df_protein_description['genomicLocs'].astype(str)
-            df_protein_description = df_protein_description.reset_index()
-            insert_df_protein_description(con, df_protein_description, commit=False, create_index=False)
-
-            # store CDSloc (location of CDS) to table CDSloc
-            df_CDSloc = df_transcript2[['CDSloc']].copy()
-            df_CDSloc = df_CDSloc.explode('CDSloc')
-            df_CDSloc['CDSloc_start'] = df_CDSloc['CDSloc'].str[0] + 1 # 1-based
-            df_CDSloc['CDSloc_end'] = df_CDSloc['CDSloc'].str[1]
-            df_CDSloc = df_CDSloc.reset_index()
-            df_CDSloc['seqname'] = chromosome
-            del df_CDSloc['CDSloc']
-            insert_df_CDSloc(con, df_CDSloc, force=False, commit=False, create_index=False)
-
-            # store genomicLocs (location of CDSplus) to based on each chromosome. genomicLocs is the loc of CDSplus, not CDS
-            df_genomicLocs = df_transcript2[['genomicLocs']].copy()
-            df_genomicLocs = df_genomicLocs.explode('genomicLocs')
-            df_genomicLocs['genomicLocs_start'] = df_genomicLocs['genomicLocs'].str[0] + 1 # 1-based
-            df_genomicLocs['genomicLocs_end'] = df_genomicLocs['genomicLocs'].str[1]
-            df_genomicLocs = df_genomicLocs.reset_index()
-            df_genomicLocs['seqname'] = chromosome
-            del df_genomicLocs['genomicLocs']
-            insert_df_genomicLocs(con, df_genomicLocs, chromosome, force=False, commit=False, create_index=False)
+            payload_info = payload_infos_by_chromosome[chromosome]
+            with open(payload_info['payload_file'], 'rb') as f:
+                payload = pickle.load(f)
+            insert_df_protein_description(con, payload['protein_description'], commit=False, create_index=False)
+            insert_df_CDSloc(con, payload['CDSloc'], force=False, commit=False, create_index=False)
+            insert_df_genomicLocs(con, payload['genomicLocs'], chromosome, force=False, commit=False, create_index=False)
 
         create_build_indexes(con, chromosomes)
         con.commit()

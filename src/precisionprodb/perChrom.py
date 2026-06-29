@@ -287,6 +287,24 @@ def translateCDSplus(transcript_id, df_transcript2):
         AA_seq = 'X' + AA_seq
     return AA_seq
 
+def translateCDSplusFromFields(args):
+    CDSplus, strand, frame = args
+    CDSplus = Seq(CDSplus)
+    if strand == '-':
+        CDSplus = CDSplus.reverse_complement()
+    frame = int(frame)
+    CDSplus = CDSplus[frame:]
+    CDSplus = CDSplus[:(len(CDSplus) // 3) * 3]
+    AA_seq = str(CDSplus.translate().split('*')[0])
+    if frame != 0:
+        AA_seq = 'X' + AA_seq
+    return AA_seq
+
+def get_pool_chunksize(total_tasks, cpu_counts, max_chunksize=200):
+    if total_tasks <= 0 or cpu_counts <= 1:
+        return 1
+    return max(1, min(max_chunksize, total_tasks // (cpu_counts * 4) or 1))
+
 
 def getMutations(df_transcript2, df_mutations, transcript_id):
     '''
@@ -309,6 +327,8 @@ def get_df_transcript2(file_gtf, file_protein, file_genome, cpu_counts, datatype
     for some reason, the strand of sequences in the gtf file is not accurate. need to calculate
     '''
     # get df_gtf
+    if cpu_counts is None or cpu_counts < 1:
+        cpu_counts = 1
     df_gtf = pd.read_csv(file_gtf, sep='\t',header=None, comment='#')
     df_gtf.columns = ['seqname','source','feature','start','end','score','strand','frame','protein_id']
     # change df_gtf seqname to str
@@ -354,11 +374,14 @@ def get_df_transcript2(file_gtf, file_protein, file_genome, cpu_counts, datatype
 
     # get CDSplus sequences
     df_gtf_group = {k:v for k,v in df_gtf.groupby('protein_id') }
-    
-    pool = Pool(cpu_counts)
-    results = pool.map(getCDSplus, df_gtf_group.items())
-    pool.close()
-    pool.join()
+    gtf_group_items = list(df_gtf_group.items())
+    if cpu_counts > 1 and len(gtf_group_items) > 1:
+        pool = Pool(cpu_counts)
+        results = pool.map(getCDSplus, gtf_group_items, chunksize=get_pool_chunksize(len(gtf_group_items), cpu_counts))
+        pool.close()
+        pool.join()
+    else:
+        results = [getCDSplus(i) for i in gtf_group_items]
     
     
     tdf = pd.DataFrame(results)
@@ -374,10 +397,14 @@ def get_df_transcript2(file_gtf, file_protein, file_genome, cpu_counts, datatype
     df_transcript2['seqname'] = chromosome
 
     # add column "AA_translate"
-    pool = Pool(cpu_counts)
-    df_transcript2['AA_translate'] = pool.starmap(translateCDSplus, [[i, df_transcript2] for i in df_transcript2.index])
-    pool.close()
-    pool.join()
+    translate_args = list(zip(df_transcript2['CDSplus'], df_transcript2['strand'], df_transcript2['frame']))
+    if cpu_counts > 1 and len(translate_args) > 1:
+        pool = Pool(cpu_counts)
+        df_transcript2['AA_translate'] = pool.map(translateCDSplusFromFields, translate_args, chunksize=get_pool_chunksize(len(translate_args), cpu_counts))
+        pool.close()
+        pool.join()
+    else:
+        df_transcript2['AA_translate'] = [translateCDSplusFromFields(i) for i in translate_args]
     # change 'frame' to int
     df_transcript2['frame'] = df_transcript2['frame'].astype(int)
     
@@ -387,10 +414,14 @@ def get_df_transcript2(file_gtf, file_protein, file_genome, cpu_counts, datatype
     # add column 'mutations' to df_transcript2, which stores index on the mutations in df_mutations
     # add column 'mutations', with list of mutation index in df_mutations
     if df_mutations is not None:
-        pool = Pool(cpu_counts)
-        results = pool.starmap(getMutations, [[df_transcript2, df_mutations, i] for i in df_transcript2.index])
-        pool.close()
-        pool.join()
+        mutation_args = [[df_transcript2, df_mutations, i] for i in df_transcript2.index]
+        if cpu_counts > 1 and len(mutation_args) > 1:
+            pool = Pool(cpu_counts)
+            results = pool.starmap(getMutations, mutation_args, chunksize=get_pool_chunksize(len(mutation_args), cpu_counts))
+            pool.close()
+            pool.join()
+        else:
+            results = [getMutations(*i) for i in mutation_args]
         df_transcript2['mutations'] = results
     
         
