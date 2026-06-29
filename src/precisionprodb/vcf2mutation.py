@@ -1,16 +1,9 @@
 import gzip
-import re
 import io
 import glob
 import os
-import itertools
 from multiprocessing import Pool
-from multiprocessing import Manager # Manager needed for shared queue if using imap_unordered, but not for starmap with main thread queue
-import queue # Thread-safe queue
-import threading # For the writer thread
-import sqlite3
 import numpy as np
-import sys
 import shutil
 import subprocess
 
@@ -24,64 +17,6 @@ except:
 def _import_pandas():
     import pandas as pd
     return pd
-
-
-def grouper_it(n, iterable, M=1):
-    """
-    Groups an iterable into chunks of size `n` and further groups these chunks into outer lists of size `M`.
-
-    This function is memory-efficient and works lazily, making it suitable for large or infinite iterables.
-
-    Parameters:
-        n (int): The size of each inner chunk. Each chunk will contain up to `n` items.
-        iterable (iterable): The input iterable (e.g., list, tuple, generator) to be grouped.
-        M (int, optional): The number of chunks to group into each outer list. Defaults to 1.
-
-    Yields:
-        list of lists: Each yielded value is a list containing `M` chunks, where each chunk is a list of up to `n` items.
-                       If the iterable is exhausted, the last yielded value may contain fewer than `M` chunks.
-
-    Examples:
-        >>> my_list = list(range(1, 21))  # [1, 2, 3, ..., 20]
-        >>> for outer_list in grouper_it(3, my_list, M=2):
-        ...     print(outer_list)
-        [[1, 2, 3], [4, 5, 6]]
-        [[7, 8, 9], [10, 11, 12]]
-        [[13, 14, 15], [16, 17, 18]]
-        [[19, 20]]
-
-        >>> for outer_list in grouper_it(2, my_list, M=3):
-        ...     print(outer_list)
-        [[1, 2], [3, 4], [5, 6]]
-        [[7, 8], [9, 10], [11, 12]]
-        [[13, 14], [15, 16], [17, 18]]
-        [[19, 20]]
-
-        >>> for outer_list in grouper_it(4, my_list, M=1):
-        ...     print(outer_list)
-        [[1, 2, 3, 4]]
-        [[5, 6, 7, 8]]
-        [[9, 10, 11, 12]]
-        [[13, 14, 15, 16]]
-        [[17, 18, 19, 20]]
-
-    Notes:
-        - If `n` or `M` is zero, the function will yield empty lists or no lists, depending on the input.
-        - If the iterable is exhausted before filling `M` chunks, the last yielded value will contain the remaining chunks.
-        - This function is memory-efficient because it uses `itertools.islice` to process the iterable lazily.
-    """
-    it = iter(iterable)
-    while True:
-        # Collect M chunks, each of size n
-        outer_chunk = []
-        for _ in range(M):
-            chunk = list(itertools.islice(it, n))
-            if not chunk:  # Stop if no more items are left
-                break
-            outer_chunk.append(chunk)
-        if not outer_chunk:  # Stop if no chunks were collected
-            break
-        yield outer_chunk
 
 
 CHROMOSOMES = {'1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', 'X', 'Y', 'M', 'chr1', 'chr2', 'chr3', 'chr4', 'chr5', 'chr6', 'chr7', 'chr8', 'chr9', 'chr10', 'chr11', 'chr12', 'chr13', 'chr14', 'chr15', 'chr16', 'chr17', 'chr18', 'chr19', 'chr20', 'chr21', 'chr22', 'chrX', 'chrY', 'chrM'}
@@ -330,37 +265,6 @@ def get_writing_string_for_complex_variant(ls_to_write):
     return ''.join(ls_txt)
 
 
-def vcfINFO2dict(info_str):
-    """
-    Parse a VCF INFO string into a dictionary, preserving all values as strings.
-    
-    Args:
-        info_str (str): The INFO field from a VCF file (e.g., "DP=100;DB;AA=T")
-        
-    Returns:
-        dict: Dictionary where keys are INFO tags and values are strings
-              (empty string for flags without values)
-    """
-    info_dict = {}
-    
-    if not info_str or info_str == ".":
-        return info_dict
-        
-    for entry in info_str.split(";"):
-        if "=" in entry:
-            key, value = entry.split("=", 1)
-            try:
-                value = float(value)
-            except:
-                pass
-            info_dict[key] = value
-        else:
-            # Handle flag-type entries without values
-            info_dict[entry] = 1
-            
-    return info_dict
-
-
 def processOneLineOfVCF(line, 
                         individual_col, 
                         chromosome_only=True, 
@@ -449,19 +353,6 @@ def processOneLineOfVCF(line,
         ls_new_line.append(new_line)
     
     return ''.join(ls_new_line)
-
-def processManyLineOfVCF(lines, 
-                        individual_col, 
-                        chromosome_only=True, 
-                        filter_PASS=True, 
-                        info_field=None, 
-                        info_field_thres=None, 
-                        chromosomes=CHROMOSOMES,
-                        file_vcf=None
-                        ):
-
-    return ''.join(processOneLineOfVCF(line, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, chromosomes, file_vcf) for line in lines)
-
 
 _WORKER_INDIVIDUAL_COL = []
 _WORKER_CHROMOSOME_ONLY = True
@@ -582,82 +473,6 @@ def convertVCF2MutationComplexStream(file_vcf, fout, individual_col, chromosome_
 
 
 
-def sanitize_identifier(identifier: str) -> str:
-    """
-    Sanitize a string to make it a valid identifier (e.g., for SQLite table names, column names, etc.).
-
-    Args:
-        identifier (str): The original string to sanitize.
-
-    Returns:
-        str: A sanitized string suitable for use as an identifier.
-    """
-    # Replace invalid characters with underscores
-    sanitized_name = re.sub(r'[^a-zA-Z0-9_]', '_', identifier)
-    
-    # Ensure the name starts with a letter or underscore
-    if not sanitized_name[0].isalpha() and sanitized_name[0] != '_':
-        sanitized_name = '_' + sanitized_name
-    
-    return sanitized_name
-
-
-def tsv2sqlite(tsv_file: str, sqlite_file: str = None, batch_size: int = 100):
-    """
-    Convert a TSV file to a SQLite database, using the row index as the primary key.
-
-    Args:
-        tsv_file (str): Path to the input TSV file.
-        sqlite_file (str): Path to the output SQLite database file.
-        batch_size (int): Number of rows to process in each batch. Default is 100.
-    """
-    pd = _import_pandas()
-    if sqlite_file is None:
-        sqlite_file = tsv_file + '.sqlite'
-    
-    # remove sqlite file if it already exists
-    if os.path.exists(sqlite_file):
-        print(f"removing existing sqlite file: {sqlite_file}")
-        os.remove(sqlite_file)
-    
-    # Create a connection to the SQLite database
-    conn = sqlite3.connect(sqlite_file)
-    cursor = conn.cursor()
-
-    # Read the TSV file in chunks
-    reader = pd.read_csv(tsv_file, sep='\t', chunksize=batch_size)
-
-    # Process each chunk
-    print('storeing tsv file to sqlite database...')
-    if tqdm:
-        to_iter_value = tqdm.tqdm(enumerate(reader))
-    else:
-        to_iter_value = enumerate(reader)
-    for i, chunk in to_iter_value:
-        columns = [i for i in chunk.columns]
-        column_group_N = len(columns) // 1000 + 1
-        # split columns to column_group_N parts
-        ls_columns = [columns[i::column_group_N] for i in range(column_group_N)]
-        for table_name, columns_use in enumerate(ls_columns):
-            table_name = 'table_'+str(table_name)
-            if i == 0:
-                # Generate the CREATE TABLE query dynamically based on the columns
-                create_table_query = f'''
-                CREATE TABLE IF NOT EXISTS {table_name} (
-                    {', '.join([f'{col} TEXT' for col in columns_use])}
-                );
-                '''
-                cursor.execute(create_table_query)
-                conn.commit()
-
-            # Insert the chunk into the SQLite table
-            chunk[columns_use].to_sql(table_name, conn, if_exists='append', index=False)
-
-    # Close the database connection
-    conn.close()
-
-    print(f"TSV file '{tsv_file}' has been successfully converted to SQLite database '{sqlite_file}'.")
-
 def tsv2memmap(tsv_file, individuals = None, memmap_file=None, batch_size=100):
     '''tsv file is a tsv file with columns: chr, pos, ref, sample1__1, sample1__2, sample2__1, sample2__2, ..., sampleN__1, sampleN__2 columns
     individuals is a list of individuals to be used. the column values must be 0 or 1
@@ -715,33 +530,6 @@ def tsv2memmap(tsv_file, individuals = None, memmap_file=None, batch_size=100):
     open(memmap_file_done, 'w').close()
     return memmap_file
 
-# --- Writer Function ---
-# --- Writer Function (Corrected) ---
-def writer_job(q, file_handle):
-    """Gets strings from the queue and writes them to the file."""
-    print("Writer thread started.") # Debug print
-    while True:
-        item = q.get() # Blocks until an item is available
-        if item is None: # Sentinel value indicates end of processing
-            print("Writer thread received sentinel. Finishing.") # Debug print
-            q.task_done() # Mark the sentinel item as processed *before* breaking
-            break
-        try:
-            file_handle.write(item)
-            # Optionally flush periodically if buffering is an issue
-            # file_handle.flush()
-        except Exception as e:
-             print(f"Error writing item in writer thread: {e}", file=sys.stderr)
-             # Decide if you want to stop or continue
-        finally:
-            # Crucially, mark the item as done *after* processing (or attempting to)
-            # This happens even if writing fails, to prevent deadlock on q.join()
-             if item is not None: # Don't double-count task_done for sentinel
-                 q.task_done()
-    print("Writer thread finished.") # Debug print
-
-
-    
 def get_header_sample_col(file_vcf,individual_input="ALL_SAMPLES"):
     '''
     return the header line based on files_vcf and individual_input
@@ -823,56 +611,6 @@ def get_header_sample_col(file_vcf,individual_input="ALL_SAMPLES"):
     header_string = '\t'.join(output_column_names) + '\n'
     
     return header_string, individual_col, fo
-
-def split_large_vcf(file_vcf, output_prefix=None, group_size = 10000):
-    '''
-    '''
-    header_string, individual_col, fo = get_header_sample_col(file_vcf)
-    if not header_string:
-        return []
-    if output_prefix is None:
-        output_prefix = file_vcf + '__split__'
-    
-    individual_col_str = '\t'.join([str(i) for i in individual_col]) + '\n'
-
-    # Read in data
-    ls_files = []
-    for i, chunk in enumerate(grouper_it(group_size, fo, 1)):
-        file_output = f'{output_prefix}.{i}.vcf'
-        ls_files.append(file_output)
-        fo = open(file_output, 'w')
-        fo.write(header_string)
-        fo.write(individual_col_str)
-        fo.write(''.join(chunk[0]))
-        fo.close()
-    return ls_files
-
-def convertVCF2MutationComplexHelper(file_vcf, file_output, header_string, individual_col, filter_PASS = True, chromosome_only = True, info_field = None, info_field_thres=None):
-    '''file_vcf is output from split_large_vcf
-    '''
-    fo = open(file_vcf,'r')
-    header_string = fo.readline()
-    individual_col = [int(i) for i in fo.readline().strip().split('\t')]
-
-    if info_field:
-        try:
-            info_field_thres = float(info_field_thres)
-        except ValueError:
-            print(f"Error: --info_field_thres ('{info_field_thres}') must be a number.")
-            return None # Or raise error
-    
-    fout = open(file_output,'w')
-    fout.write(header_string)
-    for line in fo:
-        new_line = processOneLineOfVCF(line, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, CHROMOSOMES, file_vcf)
-        fout.write(new_line)
-    fout.close()
-    fo.close()
-    return file_output
-
-def convertVCF2MutationComplexHelper_wrapper(args):
-    file_vcf_split, file_vcf_split_processed,header_string, individual_col, filter_PASS,chromosome_only,info_field,info_field_thres = args
-    return convertVCF2MutationComplexHelper(file_vcf_split, file_vcf_split_processed,header_string, individual_col, filter_PASS,chromosome_only,info_field,info_field_thres)
 
 def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL_SAMPLES", filter_PASS = True, chromosome_only = True, info_field = None, info_field_thres=None, threads = 1):
     '''convert vcf file to tsv file. with columns: chr, pos, ref, sample1__1, sample1__2, sample2__1, sample2__2, ..., sampleN__1, sampleN__2 columns
