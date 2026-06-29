@@ -1,6 +1,7 @@
 import pandas as pd
 from Bio import SeqIO
 import gzip
+import hashlib
 import os
 import time
 import pickle
@@ -32,32 +33,85 @@ if TEST:
     keep_all = True
     file_sqlite = '/XCLabServer002_fastIO/examples/GENCODE/GENCODE.tsv.sqlite'
 
-def insert_chromosomes_using(con, chromosomes_using, chromosomes_genome_description):
+def quote_identifier(name):
+    return '"' + str(name).replace('"', '""') + '"'
+
+def sanitize_identifier_fragment(value, max_length=40):
+    fragment = re.sub(r'[^0-9A-Za-z_]+', '_', str(value)).strip('_') or 'item'
+    if fragment[0].isdigit():
+        fragment = '_' + fragment
+    return fragment[:max_length]
+
+def get_genomicLocs_table_name(chromosome):
+    return f'genomicLocs_{chromosome}'
+
+def get_genomicLocs_index_name(chromosome):
+    suffix = hashlib.md5(str(chromosome).encode('utf-8')).hexdigest()[:8]
+    prefix = sanitize_identifier_fragment(chromosome)
+    return f'idx_genomicLocs_{prefix}_{suffix}_start_end'
+
+def iter_dataframe_rows(df):
+    return df.itertuples(index=False, name=None)
+
+def configure_sqlite_for_bulk_load(con):
+    pragmas = [
+        ('journal_mode', 'OFF'),
+        ('synchronous', 'OFF'),
+        ('temp_store', 'MEMORY'),
+        ('locking_mode', 'EXCLUSIVE'),
+        ('cache_size', -262144),
+        ('foreign_keys', 'OFF'),
+    ]
+    for pragma_name, pragma_value in pragmas:
+        con.execute(f'PRAGMA {pragma_name}={pragma_value}')
+
+def finalize_bulk_load_connection(con):
+    con.execute('PRAGMA journal_mode=DELETE')
+
+def create_build_indexes(con, chromosomes):
+    cur = con.cursor()
+    try:
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_protein_description_seqname ON protein_description (seqname)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_protein_id ON CDSloc (protein_id)")
+        for chromosome in chromosomes:
+            table_name = get_genomicLocs_table_name(chromosome)
+            index_name = get_genomicLocs_index_name(chromosome)
+            cur.execute(
+                f'CREATE INDEX IF NOT EXISTS {quote_identifier(index_name)} '
+                f'ON {quote_identifier(table_name)} (genomicLocs_start, genomicLocs_end)'
+            )
+    finally:
+        cur.close()
+
+def insert_chromosomes_using(con, chromosomes_using, chromosomes_genome_description, commit=True):
     '''
     Store the list of chromosomes in the table "chromosomes_using".
     If the table does not exist, it will be created.
     If a chromosome already exists in the table, update its genome description.
     '''
     cur = con.cursor()
-    # Create the table "chromosomes_using" if it doesn't exist
-    cur.execute('''
-        CREATE TABLE IF NOT EXISTS chromosomes_using (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,  -- Add an auto-incrementing primary key
-            chromosome TEXT UNIQUE,                  -- Column to store chromosome names with unique constraint
-            chromosomes_genome_description TEXT
-        )
-    ''')
-    
-    # Upsert (insert or update) the list of chromosomes into the table using executemany for better performance
-    cur.executemany('''
-        INSERT INTO chromosomes_using (chromosome, chromosomes_genome_description)
-        VALUES (?, ?)
-        ON CONFLICT(chromosome) DO UPDATE SET
-            chromosomes_genome_description=excluded.chromosomes_genome_description
-    ''', zip(chromosomes_using, chromosomes_genome_description))
+    try:
+        # Create the table "chromosomes_using" if it doesn't exist
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS chromosomes_using (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,  -- Add an auto-incrementing primary key
+                chromosome TEXT UNIQUE,                  -- Column to store chromosome names with unique constraint
+                chromosomes_genome_description TEXT
+            )
+        ''')
+        
+        # Upsert (insert or update) the list of chromosomes into the table using executemany for better performance
+        cur.executemany('''
+            INSERT INTO chromosomes_using (chromosome, chromosomes_genome_description)
+            VALUES (?, ?)
+            ON CONFLICT(chromosome) DO UPDATE SET
+                chromosomes_genome_description=excluded.chromosomes_genome_description
+        ''', zip(chromosomes_using, chromosomes_genome_description))
 
-    # Commit the changes
-    con.commit()
+        if commit:
+            con.commit()
+    finally:
+        cur.close()
 
 def read_chromosomes_and_descriptions(cur):
     '''
@@ -77,7 +131,7 @@ def read_chromosomes_and_descriptions(cur):
         print(f"An error occurred while reading from the database")
         return [], []
 
-def insert_df_protein_description(con, df_protein_description, force=False):
+def insert_df_protein_description(con, df_protein_description, force=False, commit=True, create_index=True):
     '''
     Store df_protein_description in table protein_description.
     The DataFrame contains a column named "protein_id" that will be used as the unique index for the table.
@@ -114,13 +168,15 @@ def insert_df_protein_description(con, df_protein_description, force=False):
             VALUES ({', '.join(['?' for _ in df_protein_description.columns])})
             ON CONFLICT(protein_id) DO UPDATE SET
             {', '.join([f'{col} = excluded.{col}' for col in df_protein_description.columns if col != 'protein_id'])}
-        ''', df_protein_description.values.tolist())
+        ''', iter_dataframe_rows(df_protein_description))
         
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_protein_description_seqname ON protein_description (seqname)")
-        # Commit the changes
-        con.commit()
+        if create_index:
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_protein_description_seqname ON protein_description (seqname)")
+        if commit:
+            con.commit()
     except sqlite3.Error as e:
         print(f"An error occurred while inserting into the database protein_description: {e}")
+        raise
     finally:
         cur.close()
 
@@ -159,7 +215,7 @@ def get_protein_description(con, protein_ids):
     finally:
         cur.close()
 
-def insert_df_CDSloc(con, df_CDSloc, force=False):
+def insert_df_CDSloc(con, df_CDSloc, force=False, commit=True, create_index=True):
     '''
     Store df_CDSloc in table CDSloc.
     The DataFrame contains a column named "protein_id" that will be used as an indexed column.
@@ -190,34 +246,36 @@ def insert_df_CDSloc(con, df_CDSloc, force=False):
         ''')
         
         # Create an index on the protein_id column to allow fast lookups
-        cur.execute('CREATE INDEX IF NOT EXISTS idx_protein_id ON CDSloc (protein_id)')
+        if create_index:
+            cur.execute('CREATE INDEX IF NOT EXISTS idx_protein_id ON CDSloc (protein_id)')
         
         # Insert rows into the table
         cur.executemany(f'''
             INSERT INTO CDSloc ({', '.join(df_CDSloc.columns)})
             VALUES ({', '.join(['?' for _ in df_CDSloc.columns])})
-        ''', df_CDSloc.values.tolist())
+        ''', iter_dataframe_rows(df_CDSloc))
         
-        # Commit the changes
-        con.commit()
+        if commit:
+            con.commit()
     except sqlite3.Error as e:
         print(f"An error occurred while inserting into the database CDSloc: {e}")
+        raise
     finally:
         cur.close()
 
-def insert_df_genomicLocs(con, df_genomicLocs, chromosome, force=False):
+def insert_df_genomicLocs(con, df_genomicLocs, chromosome, force=False, commit=True, create_index=True):
     '''
     Store df_genomicLocs in table "genomicLocs_" + chromosome.
     The DataFrame contains columns for genomic location information.
     If force is True, always create a new table.
     Additionally, create indexes for genomicLocs_start and genomicLocs_end columns for efficient range queries.
     '''
-    table_name = f'genomicLocs_{chromosome}'
+    table_name = get_genomicLocs_table_name(chromosome)
     cur = con.cursor()
     try:
         if force:
             # Drop the existing table if force is True
-            cur.execute(f"""DROP TABLE IF EXISTS '{table_name}' """)
+            cur.execute(f'DROP TABLE IF EXISTS {quote_identifier(table_name)}')
         
         # Create the table with appropriate column types
         column_definitions = []
@@ -229,7 +287,7 @@ def insert_df_genomicLocs(con, df_genomicLocs, chromosome, force=False):
         columns = ', '.join(column_definitions)
         
         cur.execute(f'''
-            CREATE TABLE IF NOT EXISTS "{table_name}" (
+            CREATE TABLE IF NOT EXISTS {quote_identifier(table_name)} (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 {columns}
             )
@@ -237,17 +295,23 @@ def insert_df_genomicLocs(con, df_genomicLocs, chromosome, force=False):
         
         # Insert rows into the table
         cur.executemany(f'''
-            INSERT INTO "{table_name}" ({', '.join(df_genomicLocs.columns)})
+            INSERT INTO {quote_identifier(table_name)} ({', '.join(df_genomicLocs.columns)})
             VALUES ({', '.join(['?' for _ in df_genomicLocs.columns])})
-        ''', df_genomicLocs.values.tolist())
+        ''', iter_dataframe_rows(df_genomicLocs))
         
         # Create indexes for genomicLocs_start and genomicLocs_end to enable efficient range queries
-        cur.execute(f'CREATE INDEX IF NOT EXISTS idx_genomicLocs_start_end ON "{table_name}" (genomicLocs_start, genomicLocs_end)')
+        if create_index:
+            index_name = get_genomicLocs_index_name(chromosome)
+            cur.execute(
+                f'CREATE INDEX IF NOT EXISTS {quote_identifier(index_name)} '
+                f'ON {quote_identifier(table_name)} (genomicLocs_start, genomicLocs_end)'
+            )
         
-        # Commit the changes
-        con.commit()
+        if commit:
+            con.commit()
     except sqlite3.Error as e:
         print(f"An error occurred while inserting into the database '{table_name}': {e}")
+        raise
     finally:
         cur.close()
 
@@ -519,54 +583,68 @@ def create_sqlite(file_sqlite, file_genome, file_gtf, file_protein, outprefix, d
 
     # create a sqlite3 file
     con = sqlite3.connect(file_sqlite)
-    cur = con.cursor()
+    try:
+        configure_sqlite_for_bulk_load(con)
+        con.execute('BEGIN IMMEDIATE')
 
-    # create a table to store chromosomes
-    insert_chromosomes_using(con, chromosomes_using=chromosomes_genome, chromosomes_genome_description=chromosomes_genome_description)
+        # create a table to store chromosomes
+        insert_chromosomes_using(
+            con,
+            chromosomes_using=chromosomes_genome,
+            chromosomes_genome_description=chromosomes_genome_description,
+            commit=False,
+        )
 
-    # run get df_transcript2
-    for chromosome in chromosomes:
-        fchr_genome = os.path.join(pergeno.tempfolder, chromosome + '.genome.fa')
-        fchr_gtf = os.path.join(pergeno.tempfolder, chromosome + '.gtf')
-        fchr_protein = os.path.join(pergeno.tempfolder, chromosome + '.proteins.fa')
-        perchrom = PerChrom(file_genome = fchr_genome,
-            file_gtf = fchr_gtf,
-            file_mutations = '',
-            file_protein = fchr_protein,
-            threads = threads,
-            outprefix = outprefix,
-            datatype = pergeno.datatype,
-            chromosome = chromosome)
-        
-        df_transcript2 = perchrom.df_transcript2
-        # store protein_description, AA_seq to table protein_description
-        df_protein_description = df_transcript2[[i for i in df_transcript2.columns if i not in ['CDSloc']]].copy()
-        df_protein_description['genomicLocs'] = df_protein_description['genomicLocs'].astype(str)
-        df_protein_description = df_protein_description.reset_index()
-        insert_df_protein_description(con, df_protein_description)
+        # run get df_transcript2
+        for chromosome in chromosomes:
+            fchr_genome = os.path.join(pergeno.tempfolder, chromosome + '.genome.fa')
+            fchr_gtf = os.path.join(pergeno.tempfolder, chromosome + '.gtf')
+            fchr_protein = os.path.join(pergeno.tempfolder, chromosome + '.proteins.fa')
+            perchrom = PerChrom(file_genome = fchr_genome,
+                file_gtf = fchr_gtf,
+                file_mutations = '',
+                file_protein = fchr_protein,
+                threads = threads,
+                outprefix = outprefix,
+                datatype = pergeno.datatype,
+                chromosome = chromosome)
+            
+            df_transcript2 = perchrom.df_transcript2
+            # store protein_description, AA_seq to table protein_description
+            df_protein_description = df_transcript2[[i for i in df_transcript2.columns if i not in ['CDSloc']]].copy()
+            df_protein_description['genomicLocs'] = df_protein_description['genomicLocs'].astype(str)
+            df_protein_description = df_protein_description.reset_index()
+            insert_df_protein_description(con, df_protein_description, commit=False, create_index=False)
 
-        # store CDSloc (location of CDS) to table CDSloc
-        df_CDSloc = df_transcript2[['CDSloc']].copy()
-        df_CDSloc = df_CDSloc.explode('CDSloc')
-        df_CDSloc['CDSloc_start'] = df_CDSloc['CDSloc'].str[0] + 1 # 1-based
-        df_CDSloc['CDSloc_end'] = df_CDSloc['CDSloc'].str[1]
-        df_CDSloc = df_CDSloc.reset_index()
-        df_CDSloc['seqname'] = chromosome
-        del df_CDSloc['CDSloc']
-        insert_df_CDSloc(con, df_CDSloc, force=False)
+            # store CDSloc (location of CDS) to table CDSloc
+            df_CDSloc = df_transcript2[['CDSloc']].copy()
+            df_CDSloc = df_CDSloc.explode('CDSloc')
+            df_CDSloc['CDSloc_start'] = df_CDSloc['CDSloc'].str[0] + 1 # 1-based
+            df_CDSloc['CDSloc_end'] = df_CDSloc['CDSloc'].str[1]
+            df_CDSloc = df_CDSloc.reset_index()
+            df_CDSloc['seqname'] = chromosome
+            del df_CDSloc['CDSloc']
+            insert_df_CDSloc(con, df_CDSloc, force=False, commit=False, create_index=False)
 
-        # store genomicLocs (location of CDSplus) to based on each chromosome. genomicLocs is the loc of CDSplus, not CDS
-        df_genomicLocs = df_transcript2[['genomicLocs']].copy()
-        df_genomicLocs = df_genomicLocs.explode('genomicLocs')
-        df_genomicLocs['genomicLocs_start'] = df_genomicLocs['genomicLocs'].str[0] + 1 # 1-based
-        df_genomicLocs['genomicLocs_end'] = df_genomicLocs['genomicLocs'].str[1]
-        df_genomicLocs = df_genomicLocs.reset_index()
-        df_genomicLocs['seqname'] = chromosome
-        del df_genomicLocs['genomicLocs']
-        insert_df_genomicLocs(con, df_genomicLocs, chromosome, force=False)
+            # store genomicLocs (location of CDSplus) to based on each chromosome. genomicLocs is the loc of CDSplus, not CDS
+            df_genomicLocs = df_transcript2[['genomicLocs']].copy()
+            df_genomicLocs = df_genomicLocs.explode('genomicLocs')
+            df_genomicLocs['genomicLocs_start'] = df_genomicLocs['genomicLocs'].str[0] + 1 # 1-based
+            df_genomicLocs['genomicLocs_end'] = df_genomicLocs['genomicLocs'].str[1]
+            df_genomicLocs = df_genomicLocs.reset_index()
+            df_genomicLocs['seqname'] = chromosome
+            del df_genomicLocs['genomicLocs']
+            insert_df_genomicLocs(con, df_genomicLocs, chromosome, force=False, commit=False, create_index=False)
 
-    print('building sqlite done')
-    con.close()
+        create_build_indexes(con, chromosomes)
+        con.commit()
+        finalize_bulk_load_connection(con)
+        print('building sqlite done')
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
     # clear temp folder
     tempfolder = pergeno.tempfolder
     if keep_all:
