@@ -575,7 +575,7 @@ def translateCDSplusWithMut(r, df_mutations):
     # include mutation data
     df_CDSplus = df_CDSplus.merge(tdf_m, how='left', left_on = ['chr','locs', 'bases'], right_on=['chr','pos','ref'])
     # number of variant in CDSplus
-    df_CDSplus['new_nt'] = df_CDSplus.apply(lambda x:x['alt'] if not pd.isnull(x['alt']) else x['bases'], axis=1)
+    df_CDSplus['new_nt'] = df_CDSplus['alt'].where(df_CDSplus['alt'].notna(), df_CDSplus['bases'])
     # in two cases for gencode, the deletion is in the start codon, making the code not working. So if there is deletion in the start codon, making the first three new_nt unchanged
     if df_CDSplus.iloc[2]['new_nt'] != '':
         if df_CDSplus.iloc[0]['new_nt'] == '' or df_CDSplus.iloc[1]['new_nt'] == '':
