@@ -480,50 +480,77 @@ def tsv2memmap(tsv_file, individuals = None, memmap_file=None, batch_size=100):
     '''
     if memmap_file is None:
         memmap_file = tsv_file + '.memmap'
-    pd = _import_pandas()
     
     memmap_file_done = tsv_file + '.memmap.done'
     
     if os.path.exists(memmap_file_done):
         print(f"memmap file '{memmap_file}' already exists, skipping")
         return memmap_file
-    
+
+    with open(tsv_file, 'rb') as fo:
+        header = fo.readline().decode().rstrip('\n').split('\t')
+
     if individuals is None:
-        tdf = pd.read_csv(tsv_file, sep='\t', nrows=1)
-        individuals = [i for i in tdf.columns if i not in ['chr', 'pos', 'ref', 'alt','pos_end']]
-    elif ',' in individuals:
+        individuals = [i for i in header if i not in ['chr', 'pos', 'ref', 'alt','pos_end']]
+    elif isinstance(individuals, str) and ',' in individuals:
         individuals = individuals.split(',')
     elif isinstance(individuals, str):
         individuals = [individuals]
     else:
         individuals = individuals
-    
-    # Read the TSV file in chunks
-    reader = pd.read_csv(tsv_file, sep='\t', chunksize=batch_size, usecols=individuals, dtype='int8')
 
-    # Get total number of rows
-    total_rows = sum(1 for _ in open(tsv_file)) - 1  # Subtract header row
-    
-    # Initialize memory-mapped file
+    column_to_index = {column: i for i, column in enumerate(header)}
+    missing = [individual for individual in individuals if individual not in column_to_index]
+    if missing:
+        raise ValueError('individual columns not found in tsv file: ' + ','.join(missing))
+    individual_indices = [column_to_index[individual] for individual in individuals]
+    is_contiguous = individual_indices == list(range(individual_indices[0], individual_indices[0] + len(individual_indices)))
+
+    with open(tsv_file, 'rb') as fo:
+        total_rows = sum(block.count(b'\n') for block in iter(lambda: fo.read(8 * 1024 * 1024), b'')) - 1
+
     shape = (total_rows, len(individuals))
     mmap = np.memmap(memmap_file, dtype='int8', mode='w+', shape=shape)
-    
-    # Process each chunk
-    print('storing tsv file to memmap...')
-    if tqdm:
-        to_iter_value = tqdm.tqdm(enumerate(reader), total = total_rows//batch_size + 1)
-    else:
-        to_iter_value = enumerate(reader)
 
-    # Write data to memmap
-    row_offset = 0
-    for i, chunk in to_iter_value:
-        chunk = chunk[individuals]
-        chunk_size = chunk.shape[0]
-        mmap[row_offset:row_offset + chunk_size] = chunk.values
-        row_offset += chunk_size
-        
-    # Flush changes to disk
+    print('storing tsv file to memmap...')
+
+    def field_start(line, column_index):
+        if column_index == 0:
+            return 0
+        pos = -1
+        for _ in range(column_index):
+            pos = line.find(b'\t', pos + 1)
+            if pos == -1:
+                return -1
+        return pos + 1
+
+    with open(tsv_file, 'rb') as fo:
+        fo.readline()
+        to_iter = enumerate(fo)
+        if tqdm:
+            to_iter = tqdm.tqdm(to_iter, total=total_rows)
+        for row_offset, line in to_iter:
+            line = line.rstrip(b'\n\r')
+            if is_contiguous:
+                start = field_start(line, individual_indices[0])
+                if start == -1:
+                    raise ValueError('malformed TSV line with too few columns')
+                if individual_indices[-1] == len(header) - 1:
+                    segment = line[start:]
+                else:
+                    end = field_start(line, individual_indices[-1] + 1)
+                    if end == -1:
+                        raise ValueError('malformed TSV line with too few columns')
+                    segment = line[start:end - 1]
+                values = np.frombuffer(segment, dtype=np.uint8)[::2] - ord('0')
+                if values.shape[0] != len(individuals):
+                    fields = line.split(b'\t')
+                    values = np.fromiter((int(fields[i]) for i in individual_indices), dtype=np.int8, count=len(individual_indices))
+                mmap[row_offset] = values
+            else:
+                fields = line.split(b'\t')
+                mmap[row_offset] = np.fromiter((int(fields[i]) for i in individual_indices), dtype=np.int8, count=len(individual_indices))
+
     mmap.flush()
     del mmap
     print(f"TSV file '{tsv_file}' has been successfully converted to memory-mapped file '{memmap_file}'")
