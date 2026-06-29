@@ -530,6 +530,34 @@ def get_protein_ids_from_tdf(tdf, pos, pos_end=None):
 
     return matching_protein_ids
 
+def get_protein_ids_from_tdf_batch(tdf, params):
+    '''
+    Match many genomic intervals against one chromosome's genomicLocs table.
+
+    The table is expected to be sorted by genomicLocs_start and genomicLocs_end.
+    For each query, restrict candidates to rows whose start could still overlap
+    based on the maximum interval length, then apply the original end filter.
+    '''
+    if len(params) == 0:
+        return []
+
+    starts = tdf['genomicLocs_start'].to_numpy()
+    ends = tdf['genomicLocs_end'].to_numpy()
+    protein_ids = tdf['protein_id'].to_numpy(dtype=object)
+    max_interval_length = int((ends - starts).max()) if len(starts) else 0
+
+    results = []
+    for pos, pos_end in params:
+        left = np.searchsorted(starts, pos_end - max_interval_length, side='left')
+        right = np.searchsorted(starts, pos, side='left')
+        if right <= left:
+            results.append([])
+            continue
+        matching_idx = np.flatnonzero(ends[left:right] >= pos_end) + left
+        results.append(protein_ids[matching_idx].tolist())
+
+    return results
+
 
 def get_protein_id_from_genomicLocs(con, chromosome, pos, pos_end=None, threads=None):
     '''
@@ -591,13 +619,7 @@ def get_protein_id_from_genomicLocs(con, chromosome, pos, pos_end=None, threads=
             query = f'SELECT * FROM "{table_name}"'
             tdf = pd.read_sql_query(query, con)
             tdf = tdf.sort_values(by=['genomicLocs_start', 'genomicLocs_end'])
-            if threads > 1:
-                pool = Pool(threads)
-                ls_results = pool.starmap(get_protein_ids_from_tdf, [[tdf, pos, pos_end] for pos, pos_end in dc_params[a_chromosome]])
-                pool.close()
-                pool.join()
-            else:
-                ls_results = [get_protein_ids_from_tdf(tdf, pos, pos_end) for pos, pos_end in dc_params[a_chromosome]]
+            ls_results = get_protein_ids_from_tdf_batch(tdf, dc_params[a_chromosome])
             for i,j in zip(dc_params[a_chromosome], ls_results):
                 dc_results[(a_chromosome, i[0], i[1])] = j
         
