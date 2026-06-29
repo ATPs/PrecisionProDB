@@ -1,7 +1,6 @@
 import gzip
 import re
 import io
-import pandas as pd
 import glob
 import os
 import itertools
@@ -13,12 +12,18 @@ import sqlite3
 import numpy as np
 import sys
 import shutil
+import subprocess
 
 try:
     import tqdm
 except:
     print('Cannot import tqdm. Will not use tqdm.')
     tqdm = False
+
+
+def _import_pandas():
+    import pandas as pd
+    return pd
 
 
 def grouper_it(n, iterable, M=1):
@@ -88,6 +93,78 @@ def openFile(filename):
         return gzip.open(filename,'rt')
     return open(filename)
 
+
+def openVCFStreamFast(filename, threads=1):
+    '''Open VCF text stream, using external parallel gzip decompression when available.'''
+    if not filename.endswith('.gz'):
+        return open(filename), None
+
+    decompress_threads = max(1, min(4, int(threads) if threads else 1))
+    if shutil.which('pigz'):
+        cmd = ['pigz', '-dc', '-p', str(decompress_threads), filename]
+    elif shutil.which('bgzip'):
+        cmd = ['bgzip', '-@', str(decompress_threads), '-dc', filename]
+    else:
+        return gzip.open(filename, 'rt'), None
+
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return io.TextIOWrapper(proc.stdout), proc
+
+
+def closeVCFStreamFast(fo, proc=None):
+    '''Close a VCF stream opened by openVCFStreamFast and check decompressor status.'''
+    fo.close()
+    if proc is not None:
+        _, stderr = proc.communicate()
+        if proc.returncode not in (0, None):
+            raise RuntimeError(stderr.decode(errors='replace').strip())
+
+
+def iter_vcf_records(file_vcf, threads=1):
+    '''Yield non-header VCF records from a text or gzipped VCF.'''
+    fo, proc = openVCFStreamFast(file_vcf, threads=threads)
+    try:
+        for line in fo:
+            if line.startswith('##'):
+                continue
+            if line.startswith('#CHROM'):
+                break
+        for line in fo:
+            yield line
+    finally:
+        closeVCFStreamFast(fo, proc)
+
+
+def info_field_value(info_str, field):
+    '''Return a single INFO field value without parsing the whole INFO column.'''
+    start = info_str.find(field + '=')
+    if start == -1:
+        return None
+    if start > 0 and info_str[start - 1] != ';':
+        start = info_str.find(';' + field + '=')
+        if start == -1:
+            return None
+        start += 1
+    value_start = start + len(field) + 1
+    value_end = info_str.find(';', value_start)
+    if value_end == -1:
+        value_end = len(info_str)
+    return info_str[value_start:value_end]
+
+
+def info_field_passes_threshold(info_str, field, threshold):
+    '''Return True if any comma-separated INFO value reaches the threshold.'''
+    value = info_field_value(info_str, field)
+    if value is None:
+        return None
+    for one_value in value.split(','):
+        try:
+            if float(one_value) >= threshold:
+                return True
+        except ValueError:
+            continue
+    return False
+
 def getMutationsFromVCF(file_vcf, outprefix = None, individual=None, filter_PASS = True, chromosome_only = True):
     '''return two dataframe of mutations.
     if outprefix is not None, write the two dataframe to outprfex +'_1/2.tsv' two files as mutation file
@@ -95,6 +172,7 @@ def getMutationsFromVCF(file_vcf, outprefix = None, individual=None, filter_PASS
     if individual is None, work on the first individual in the vcf file
     default, only work on variants in chromosome
     '''
+    pd = _import_pandas()
     if ',' in file_vcf:
         files_vcf = file_vcf.split(',')
     elif os.path.exists(file_vcf):
@@ -329,12 +407,11 @@ def processOneLineOfVCF(line,
     if info_field:
         if info_field_thres:
             info_str = es[7]
-            info_dict = vcfINFO2dict(info_str)
-            if info_field in info_dict:
-                if info_dict[info_field] < info_field_thres:
-                    return ''
-            else:
+            passes_threshold = info_field_passes_threshold(info_str, info_field, info_field_thres)
+            if passes_threshold is None:
                 print('waring! INFO field', info_field, 'not found in', file_vcf, line)
+            elif not passes_threshold:
+                return ''
     # skip if no mutation
     if all([genotype.startswith('0|0') or genotype.startswith('0/0') or genotype.startswith('.|.') or genotype.startswith('./.') for genotype in genotypes]) and len(genotypes) >= 1:
         return ''
@@ -382,8 +459,126 @@ def processManyLineOfVCF(lines,
                         chromosomes=CHROMOSOMES,
                         file_vcf=None
                         ):
-    
+
     return ''.join(processOneLineOfVCF(line, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, chromosomes, file_vcf) for line in lines)
+
+
+_WORKER_INDIVIDUAL_COL = []
+_WORKER_CHROMOSOME_ONLY = True
+_WORKER_FILTER_PASS = True
+_WORKER_INFO_FIELD = None
+_WORKER_INFO_FIELD_THRES = None
+_WORKER_FILE_VCF = None
+
+
+def init_vcf_worker(individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, file_vcf):
+    global _WORKER_INDIVIDUAL_COL
+    global _WORKER_CHROMOSOME_ONLY
+    global _WORKER_FILTER_PASS
+    global _WORKER_INFO_FIELD
+    global _WORKER_INFO_FIELD_THRES
+    global _WORKER_FILE_VCF
+    _WORKER_INDIVIDUAL_COL = individual_col
+    _WORKER_CHROMOSOME_ONLY = chromosome_only
+    _WORKER_FILTER_PASS = filter_PASS
+    _WORKER_INFO_FIELD = info_field
+    _WORKER_INFO_FIELD_THRES = info_field_thres
+    _WORKER_FILE_VCF = file_vcf
+
+
+def processOneLineOfVCFFast(line):
+    es = line.rstrip('\n').split('\t')
+    if len(es) < 8:
+        return processOneLineOfVCF(line, _WORKER_INDIVIDUAL_COL, _WORKER_CHROMOSOME_ONLY, _WORKER_FILTER_PASS, _WORKER_INFO_FIELD, _WORKER_INFO_FIELD_THRES, CHROMOSOMES, _WORKER_FILE_VCF)
+
+    chromosome, position, reference, alternatives, FILTER = es[0], es[1], es[3], es[4], es[6]
+
+    if _WORKER_CHROMOSOME_ONLY and chromosome not in CHROMOSOMES:
+        return ''
+    if _WORKER_FILTER_PASS and FILTER != 'PASS':
+        return ''
+    if _WORKER_INFO_FIELD and _WORKER_INFO_FIELD_THRES:
+        passes_threshold = info_field_passes_threshold(es[7], _WORKER_INFO_FIELD, _WORKER_INFO_FIELD_THRES)
+        if passes_threshold is None:
+            print('waring! INFO field', _WORKER_INFO_FIELD, 'not found in', _WORKER_FILE_VCF, line)
+        elif not passes_threshold:
+            return ''
+
+    if ',' in alternatives:
+        return processOneLineOfVCF(line, _WORKER_INDIVIDUAL_COL, _WORKER_CHROMOSOME_ONLY, _WORKER_FILTER_PASS, _WORKER_INFO_FIELD, _WORKER_INFO_FIELD_THRES, CHROMOSOMES, _WORKER_FILE_VCF)
+    alternative = alternatives
+    if alternative == '*':
+        return ''
+    if len(reference) > 1 and len(alternative) > 1:
+        return processOneLineOfVCF(line, _WORKER_INDIVIDUAL_COL, _WORKER_CHROMOSOME_ONLY, _WORKER_FILTER_PASS, _WORKER_INFO_FIELD, _WORKER_INFO_FIELD_THRES, CHROMOSOMES, _WORKER_FILE_VCF)
+
+    if not _WORKER_INDIVIDUAL_COL:
+        return f'{chromosome}\t{position}\t{reference}\t{alternative}\n'
+
+    bits = []
+    has_alt = False
+    for col in _WORKER_INDIVIDUAL_COL:
+        genotype = es[col]
+        if len(genotype) < 3:
+            return processOneLineOfVCF(line, _WORKER_INDIVIDUAL_COL, _WORKER_CHROMOSOME_ONLY, _WORKER_FILTER_PASS, _WORKER_INFO_FIELD, _WORKER_INFO_FIELD_THRES, CHROMOSOMES, _WORKER_FILE_VCF)
+        a1, sep, a2 = genotype[0], genotype[1], genotype[2]
+        if sep not in ('|', '/'):
+            return processOneLineOfVCF(line, _WORKER_INDIVIDUAL_COL, _WORKER_CHROMOSOME_ONLY, _WORKER_FILTER_PASS, _WORKER_INFO_FIELD, _WORKER_INFO_FIELD_THRES, CHROMOSOMES, _WORKER_FILE_VCF)
+        if a1 == '1':
+            bits.append('1')
+            has_alt = True
+        elif a1 in ('0', '.'):
+            bits.append('0')
+        else:
+            return processOneLineOfVCF(line, _WORKER_INDIVIDUAL_COL, _WORKER_CHROMOSOME_ONLY, _WORKER_FILTER_PASS, _WORKER_INFO_FIELD, _WORKER_INFO_FIELD_THRES, CHROMOSOMES, _WORKER_FILE_VCF)
+        if a2 == '1':
+            bits.append('1')
+            has_alt = True
+        elif a2 in ('0', '.'):
+            bits.append('0')
+        else:
+            return processOneLineOfVCF(line, _WORKER_INDIVIDUAL_COL, _WORKER_CHROMOSOME_ONLY, _WORKER_FILTER_PASS, _WORKER_INFO_FIELD, _WORKER_INFO_FIELD_THRES, CHROMOSOMES, _WORKER_FILE_VCF)
+
+    if not has_alt:
+        return ''
+    return f'{chromosome}\t{position}\t{reference}\t{alternative}\t' + '\t'.join(bits) + '\n'
+
+
+def processVCFChunkFast(lines):
+    return ''.join(processOneLineOfVCFFast(line) for line in lines)
+
+
+def vcf_line_chunks(file_vcf, chunk_size=2000, threads=1):
+    chunk = []
+    for line in iter_vcf_records(file_vcf, threads=threads):
+        chunk.append(line)
+        if len(chunk) >= chunk_size:
+            yield chunk
+            chunk = []
+    if chunk:
+        yield chunk
+
+
+def convertVCF2MutationComplexStream(file_vcf, fout, individual_col, chromosome_only=True, filter_PASS=True, info_field=None, info_field_thres=None, threads=1, chunk_size=2000):
+    '''Convert VCF records to mutation TSV through an ordered streaming worker pool.'''
+    if threads <= 1:
+        init_vcf_worker(individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, file_vcf)
+        for lines in vcf_line_chunks(file_vcf, chunk_size=chunk_size, threads=threads):
+            fout.write(processVCFChunkFast(lines))
+        return
+
+    pool = Pool(threads, initializer=init_vcf_worker, initargs=(individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, file_vcf))
+    chunks = vcf_line_chunks(file_vcf, chunk_size=chunk_size, threads=threads)
+    try:
+        results = pool.imap(processVCFChunkFast, chunks, chunksize=1)
+        if tqdm:
+            results = tqdm.tqdm(results, desc=f"vcf converting to tsv: {os.path.basename(file_vcf)}")
+        for text in results:
+            if text:
+                fout.write(text)
+    finally:
+        pool.close()
+        pool.join()
 
 
 
@@ -416,6 +611,7 @@ def tsv2sqlite(tsv_file: str, sqlite_file: str = None, batch_size: int = 100):
         sqlite_file (str): Path to the output SQLite database file.
         batch_size (int): Number of rows to process in each batch. Default is 100.
     """
+    pd = _import_pandas()
     if sqlite_file is None:
         sqlite_file = tsv_file + '.sqlite'
     
@@ -469,6 +665,7 @@ def tsv2memmap(tsv_file, individuals = None, memmap_file=None, batch_size=100):
     '''
     if memmap_file is None:
         memmap_file = tsv_file + '.memmap'
+    pd = _import_pandas()
     
     memmap_file_done = tsv_file + '.memmap.done'
     
@@ -723,75 +920,44 @@ def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL
             print(f"Error: --info_field_thres ('{info_field_thres}') must be a number.")
             return [] # Or raise error
 
-    fout = open(file_output, 'w')
     dc_header_string_and_other_info = {file_vcf:get_header_sample_col(file_vcf) for file_vcf in files_vcf}
     dc_header_string_and_other_info = {k:v for k,v in dc_header_string_and_other_info.items() if v[0]}
+    if len(dc_header_string_and_other_info) == 0:
+        return []
     if len(set([i[0] for i in dc_header_string_and_other_info.values()])) != 1:
         print(f"Error: Different header strings found in {files_vcf}.")
+        for _, _, fo in dc_header_string_and_other_info.values():
+            fo.close()
         return []
     header_string = list(dc_header_string_and_other_info.values())[0][0]
     column_for_samples = header_string.strip().split()[4:]
-    fout.write(header_string)
     
     total_vcf_size = sum([os.path.getsize(file_vcf) for file_vcf in files_vcf])
-    
-    if threads == 1 or total_vcf_size < 10*1024*1024:
-        for file_vcf in dc_header_string_and_other_info:
-            header_string, individual_col, fo = dc_header_string_and_other_info[file_vcf]
-            if tqdm:
-                to_iter = tqdm.tqdm(fo)
-            else:
-                to_iter = fo
-            for line in to_iter:
-                new_line = processOneLineOfVCF(line, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, CHROMOSOMES, file_vcf)
-                if new_line:
-                    fout.write(new_line)
-            print('finish converting vcf file:', file_vcf)
-        fo.close()
-        
-        return column_for_samples
+    use_stream_pool = threads > 1 and total_vcf_size >= 10*1024*1024
 
-    # use multiple threads
-    print('use multiple threads to convert the vcf files by splitting the vcf files into smaller files')
-    folder_temp = file_output + '_temp'
-    folder_temp_split = os.path.join(folder_temp, 'vcf_split')
+    with open(file_output, 'w') as fout:
+        fout.write(header_string)
+        if use_stream_pool:
+            print('use multiple threads to convert the vcf files by streaming chunks')
+            for file_vcf in dc_header_string_and_other_info:
+                _, individual_col, fo = dc_header_string_and_other_info[file_vcf]
+                fo.close()
+                convertVCF2MutationComplexStream(file_vcf, fout, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, threads=threads)
+                print('finish converting vcf file:', file_vcf)
+        else:
+            for file_vcf in dc_header_string_and_other_info:
+                _, individual_col, fo = dc_header_string_and_other_info[file_vcf]
+                if tqdm:
+                    to_iter = tqdm.tqdm(fo)
+                else:
+                    to_iter = fo
+                for line in to_iter:
+                    new_line = processOneLineOfVCF(line, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, CHROMOSOMES, file_vcf)
+                    if new_line:
+                        fout.write(new_line)
+                fo.close()
+                print('finish converting vcf file:', file_vcf)
 
-    if not os.path.exists(folder_temp_split):
-        os.makedirs(folder_temp_split)
-    pool = Pool(threads)
-    params = []
-    for file_vcf in dc_header_string_and_other_info:
-        params.append([file_vcf, os.path.join(folder_temp_split,os.path.basename(file_vcf)), 10000])
-    files_vcf_split = pool.starmap(split_large_vcf, params, chunksize=1)
-    pool.close()
-    pool.join()
-    print('vcf files were splitted to {} files'.format(len([i for j in files_vcf_split for i in j])))
-    
-    pool = Pool(threads)
-    params = []
-    for file_vcf, files_vcf_split_batch in zip(dc_header_string_and_other_info.keys(), files_vcf_split):
-        header_string, individual_col, fo = dc_header_string_and_other_info[file_vcf]
-        for file_vcf_split in files_vcf_split_batch:
-            file_vcf_split_processed = os.path.join(folder_temp, os.path.basename(file_vcf_split))+'processed.tsv'
-            params.append([file_vcf_split, file_vcf_split_processed,header_string, individual_col, filter_PASS,chromosome_only,info_field,info_field_thres])
-    
-    imap_files_vcf_split_processed = pool.imap(convertVCF2MutationComplexHelper_wrapper, params, chunksize=1)
-    if tqdm:
-        files_vcf_split_processed = list(tqdm.tqdm(imap_files_vcf_split_processed, total=len(params), desc=f"vcf converting to tsv"))
-    else:
-        files_vcf_split_processed = list(imap_files_vcf_split_processed)
-    # files_vcf_split_processed = pool.starmap(convertVCF2MutationComplexHelper, params, chunksize=1)
-    pool.close()
-    pool.join()
-    
-    shutil.rmtree(folder_temp_split)
-    for file_vcf_split_processed in files_vcf_split_processed:
-        fo = open(file_vcf_split_processed,'r')
-        fo.readline()
-        fout.write(fo.read())
-
-    shutil.rmtree(folder_temp)
-    fout.close()
     open(file_output_done, 'w').write('\n'.join(column_for_samples))
     return column_for_samples
 
