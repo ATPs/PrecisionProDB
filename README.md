@@ -17,6 +17,8 @@ It is updated to support the [human Genome assembly T2T-CHM13v2.0](https://www.n
 
 **[For more running examples, visit the example folder](/examples/) and the [test_output folder](/test_output/).**
 
+Release update notes are collected in the [`releases-notes`](/releases-notes/) folder.
+
 ## [PrecisionProDB online](https://precisionprodb.genes.fun/)
 PrecisionProDB is [now available here](https://precisionprodb.genes.fun/) for faster checking of effect of variants in protein sequences. Users may also upload a small tsv/tsv.gz file to use the pre-defined gene models.
 
@@ -41,6 +43,7 @@ PrecisionProDB is [now available here](https://precisionprodb.genes.fun/) for fa
   - [Count number of changed amino acids (AAs)](#count-number-of-changed-amino-acids-aas)
   - [Further comparison](#further-comparison)
 - [Benchmark](#Benchmark)
+- [Release Notes](#release-notes)
 - [PrecisionProDB\_references](#precisionprodb_references)
 - [Workflow](#Workflow)
 - [Contact Information](#contact-information)
@@ -324,6 +327,10 @@ Users may use tools like https://github.com/pwilmart/fasta_utilities to further 
 * [Benchmark of PrecisonProDB 1.0](https://github.com/ATPs/PrecisionProDB/wiki/Benchmark-of-PrecisonProDB-1.0)
 * [Benchmark of PrecisonProDB 2.0](https://github.com/ATPs/PrecisionProDB/wiki/Benchmark-of-PrecisonProDB-2.0)
 
+# Release Notes
+
+Release update notes are stored in the [`releases-notes`](/releases-notes/) folder.
+
 # PrecisionProDB_references
 
 [The Genome Aggregation Database (gnomAD) project](https://gnomad.broadinstitute.org/), provide variant allele frequencies in different populations based on genomes and exomes of hundreds of thousands of individuals and this information can be integrated into a protein database. We applied PrecisionProDB to alleles from different populations from gnomAD 3.1 data. Results can be found at https://github.com/ATPs/PrecisionProDB_references.
@@ -474,4 +481,3 @@ AGGSQL --> OUTS
 
 
 Please leave comments on the [**issue**](https://github.com/ATPs/PrecisionProDB/issues) tab.
-
