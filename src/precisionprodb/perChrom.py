@@ -14,6 +14,7 @@ _CDSPLUS_CACHE = {}
 _CDSPLUS_KEY_INDEX_CACHE = {}
 _CDSPLUS_DIRECT_CACHE = {}
 _MUT_HELPER_CACHE = {}
+_CODON_TRANSLATE_CACHE = {}
 
 
 def _print_once_per_process(key, *args):
@@ -138,6 +139,21 @@ def _direct_translation_result(tdc_result, AA_seq, frame, new_nt, variant_ids):
         tdc_result['new_AA'] = tdc_result['new_AA'].replace('_','*')
         return tdc_result
     return None
+
+
+def _translate_codon_cached(codon):
+    aa = _CODON_TRANSLATE_CACHE.get(codon)
+    if aa is None:
+        aa = str(Seq(codon).translate())
+        _CODON_TRANSLATE_CACHE[codon] = aa
+    return aa
+
+
+def _translate_alt_codons(codon_alt, codon_ref, aa_ref):
+    return [
+        ref_aa if alt == ref else _translate_codon_cached(alt)
+        for alt, ref, ref_aa in zip(codon_alt, codon_ref, aa_ref)
+    ]
 
 
 def openFile(filename):
@@ -374,10 +390,33 @@ def getCodons(ttdf, AA_len=None):
         AA_len = ttdf.shape[0] // 3
     if AA_len * 3 >= ttdf.shape[0]:
         AA_len = ttdf.shape[0] // 3
-    ttdf = ttdf.iloc[:AA_len * 3]
-    tdf_result = ttdf.groupby(np.arange(AA_len * 3) // 3).agg({'chr':'first', 'strand':'first', 'locs':'first', 'bases':lambda x:''.join(x), 'variant_id':lambda x:','.join(list(dict.fromkeys([e for e in list(x) if pd.notnull(e)])))})
-    tdf_result.columns = ['chr', 'strand', 'codon1', 'codon','variants']
-    return tdf_result
+    n_bases = AA_len * 3
+    if n_bases == 0:
+        return pd.DataFrame(columns=['chr', 'strand', 'codon1', 'codon','variants'])
+
+    ttdf = ttdf.iloc[:n_bases]
+    chromosomes = ttdf['chr'].tolist()
+    strands = ttdf['strand'].tolist()
+    locs = ttdf['locs'].tolist()
+    bases = ttdf['bases'].tolist()
+    variant_ids = ttdf['variant_id'].tolist()
+
+    results = []
+    for start in range(0, n_bases, 3):
+        variants = ','.join(
+            dict.fromkeys(
+                e for e in variant_ids[start:start + 3]
+                if pd.notnull(e)
+            )
+        )
+        results.append([
+            chromosomes[start],
+            strands[start],
+            locs[start],
+            ''.join(bases[start:start + 3]),
+            variants,
+        ])
+    return pd.DataFrame(results, columns=['chr', 'strand', 'codon1', 'codon','variants'])
 
 
 # get loc for each nt in CDSplus
@@ -782,7 +821,7 @@ def translateCDSplusWithMut(r, df_mutations):
         return {}
 
     codons_alt.loc[codons_alt.duplicated('AA_index'),['codon_ref','AA_ref','AA_index']] = np.nan # only use each AA_ref Once
-    codons_alt['AA_alt'] = codons_alt.apply(lambda x:x['AA_ref'] if x['codon_alt'] == x['codon_ref'] else str(Seq(x['codon_alt']).translate()), axis=1)
+    codons_alt['AA_alt'] = _translate_alt_codons(codons_alt['codon_alt'], codons_alt['codon_ref'], codons_alt['AA_ref'])
     # codons_alt['AA_index'] = codons_alt['AA_index'].fillna(method='ffill')
     codons_alt['AA_index'] = codons_alt['AA_index'].ffill()
     new_AA = str(''.join(codons_alt['AA_alt']).split('*')[0])
