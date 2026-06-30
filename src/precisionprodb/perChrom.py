@@ -9,6 +9,16 @@ import time
 import numpy as np
 import re
 
+_PRINTED_WARNINGS = set()
+
+
+def _print_once_per_process(key, *args):
+    if key in _PRINTED_WARNINGS:
+        return
+    _PRINTED_WARNINGS.add(key)
+    print(*args)
+
+
 def openFile(filename):
     '''open text or gzipped text file
     '''
@@ -523,7 +533,11 @@ def create_df_CDSplus_for_transcript_id(r):
     
     # sometimes the AA sequences for example ENSP00000466819, is longer than the CDSplus. skip.
     if len(AA_seq.strip('X'))*3 > len(CDSplus):
-        print(transcript_id, 'input protein sequences cannot be translated from the CDS sequence in gtf annotation.')
+        _print_once_per_process(
+            ('protein_not_translated_from_cds', transcript_id),
+            transcript_id,
+            'input protein sequences cannot be translated from the CDS sequence in gtf annotation.'
+        )
 
     if strand == '-':
         CDSplus = CDSplus.reverse_complement()
@@ -579,7 +593,11 @@ def translateCDSplusWithMut(r, df_mutations):
     # in two cases for gencode, the deletion is in the start codon, making the code not working. So if there is deletion in the start codon, making the first three new_nt unchanged
     if df_CDSplus.iloc[2]['new_nt'] != '':
         if df_CDSplus.iloc[0]['new_nt'] == '' or df_CDSplus.iloc[1]['new_nt'] == '':
-            print(transcript_id, 'special case: start codon frame shift deletion')
+            _print_once_per_process(
+                ('start_codon_frame_shift_deletion', transcript_id),
+                transcript_id,
+                'special case: start codon frame shift deletion'
+            )
         if df_CDSplus.iloc[0]['new_nt'] == '':
             df_CDSplus.loc[0, 'new_nt'] = df_CDSplus.iloc[0]['ref']
         if df_CDSplus.iloc[1]['new_nt'] == '':
@@ -616,9 +634,15 @@ def translateCDSplusWithMut(r, df_mutations):
             return tdc_result
     else:
         if 'U' in AA_seq:
-            print(f'{transcript_id} with selenocysteine, special case')
+            _print_once_per_process(
+                ('selenocysteine', transcript_id),
+                f'{transcript_id} with selenocysteine, special case'
+            )
         else:
-            print(f'warning! protein {transcript_id}, the original provided protein sequence is {AA_seq} and translated protein sequence from the GTF annotation is {AA_translate}')
+            _print_once_per_process(
+                ('annotation_mismatch', transcript_id),
+                f'warning! protein {transcript_id}, the original provided protein sequence is {AA_seq} and translated protein sequence from the GTF annotation is {AA_translate}'
+            )
             
     # translation with non-standard codons or complicate cases
     df_CDSref = df_CDSplus[['locs', 'bases', 'chr', 'strand','variant_id']].copy()
@@ -640,7 +664,11 @@ def translateCDSplusWithMut(r, df_mutations):
     codons_alt.columns = ['chr','strand','codon1', 'codon_alt','variants', 'codon_ref', 'variants_ref','AA_ref','AA_index']
     # 20220510: start codon frame shift complex case, ignore for now, then AA_index column will be all "NaN"
     if all(codons_alt['AA_index'].isnull()):
-        print('frame shift, complex case, no change for', transcript_id)
+        _print_once_per_process(
+            ('frame_shift_complex_no_change', transcript_id),
+            'frame shift, complex case, no change for',
+            transcript_id
+        )
         return {}
 
     codons_alt.loc[codons_alt.duplicated('AA_index'),['codon_ref','AA_ref','AA_index']] = np.nan # only use each AA_ref Once
@@ -734,11 +762,18 @@ def translateCDSplusWithMut(r, df_mutations):
             if AA_ori in new_AA:#new_AA is longer than AA_ori at the end of the sequence, stop loss
                 new_AA = new_AA #AA_ori
             elif new_AA in AA_translate:
-                print(transcript_id, 'AA_translate longer than provided AA sequence, the gtf file not consistent with the protein file')
+                _print_once_per_process(
+                    ('aa_translate_longer', transcript_id),
+                    transcript_id,
+                    'AA_translate longer than provided AA sequence, the gtf file not consistent with the protein file'
+                )
             else:
-                print(transcript_id,'something wrong, likely to be mutation in start codon?')
-                print('input AA', AA_ori)
-                print('translated AA', new_AA)
+                key = ('unexpected_translation', transcript_id)
+                if key not in _PRINTED_WARNINGS:
+                    _PRINTED_WARNINGS.add(key)
+                    print(transcript_id,'something wrong, likely to be mutation in start codon?')
+                    print('input AA', AA_ori)
+                    print('translated AA', new_AA)
     
     tdc_result['new_AA'] = new_AA.replace('_','*')
     tdc_result['frameChange'] = frameChange

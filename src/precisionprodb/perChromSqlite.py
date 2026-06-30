@@ -22,6 +22,7 @@ except:
     tqdm = False
 
 _MEMMAP_CACHE = {}
+_TRANSLATION_DF_MUTATIONS = None
 # # Global variables
 # con = None
 # df_mutations = None
@@ -232,11 +233,20 @@ def save_mutation_and_proteins(df_transcript3, outprefix):
         if pd.notnull(r['new_AA']) and r['new_AA'] != r['AA_seq']:
             fout.write('>{}\tchanged\n{}\n'.format(r['protein_id_fasta'], r['new_AA']))
     fout.close()
+def _init_translation_worker(df_mutations):
+    global _TRANSLATION_DF_MUTATIONS
+    _TRANSLATION_DF_MUTATIONS = df_mutations
+
+
 # Define the wrapper function needed for imap
 def translate_wrapper(args):
     """Unpacks arguments for translateCDSplusWithMut2"""
-    row_series, mutations_df = args
-    # Assuming perChrom.translateCDSplusWithMut2 exists and works like this
+    global _TRANSLATION_DF_MUTATIONS
+    if isinstance(args, (list, tuple)) and len(args) == 2:
+        row_series, mutations_df = args
+    else:
+        row_series = args
+        mutations_df = _TRANSLATION_DF_MUTATIONS
     return perChrom.translateCDSplusWithMut2(row_series, mutations_df)
 
 
@@ -395,11 +405,11 @@ class PerChrom_sqlite(object):
             return df_transcript3
 
         if cpu_counts > 1:
-            pool = Pool(cpu_counts)
-            starmap_args = [[r, df_mutations] for _,r in df_transcript3.iterrows()]
+            pool = Pool(cpu_counts, initializer=_init_translation_worker, initargs=(df_mutations,))
+            starmap_args = [r for _,r in df_transcript3.iterrows()]
             
             total_tasks = df_transcript3.shape[0]
-            chunk_size = min(200, total_tasks // cpu_counts // 4)
+            chunk_size = max(1, min(200, total_tasks // cpu_counts // 4))
             
             # results = pool.starmap(perChrom.translateCDSplusWithMut2, starmap_args, chunksize=100)
             imap_results = pool.imap(translate_wrapper, starmap_args, chunksize=chunk_size)
