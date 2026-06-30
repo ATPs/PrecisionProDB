@@ -142,6 +142,67 @@ def _direct_translation_result(tdc_result, AA_seq, frame, new_nt, variant_ids):
     return None
 
 
+def _direct_sparse_translation_result(tdc_result, transcript_id, df_CDSplus, tdf_m, AA_seq, frame):
+    right_keys = ['chr', 'pos', 'ref']
+    direct_cache = _get_CDSplus_direct_cache(transcript_id, df_CDSplus)
+    if direct_cache['has_duplicate_keys'] or tdf_m.duplicated(right_keys).any():
+        return None
+
+    bases = direct_cache['bases']
+    key_index = direct_cache['key_index']
+    codon_changes = {}
+    any_matched = False
+    for r in tdf_m.itertuples(index=False):
+        idx = key_index.get((r.chr, r.pos, r.ref))
+        if idx is None:
+            continue
+        any_matched = True
+        if len(r.alt) != 1:
+            return None
+        codon_idx, offset = divmod(idx, 3)
+        codon_changes.setdefault(codon_idx, {})[offset] = (r.alt, r.variant_id)
+
+    if not any_matched:
+        return None
+
+    new_AA = list(AA_seq)
+    variant_AA = []
+    for codon_idx in sorted(codon_changes):
+        if codon_idx >= len(AA_seq) or codon_idx * 3 + 2 >= len(bases):
+            return None
+
+        start = codon_idx * 3
+        ref_codon = ''.join(bases[start:start + 3])
+        ref_aa = _translate_codon_cached(ref_codon)
+        if ref_aa != AA_seq[codon_idx]:
+            return None
+
+        alt_codon = list(ref_codon)
+        variant_ids = [np.nan, np.nan, np.nan]
+        for offset, (alt, variant_id) in codon_changes[codon_idx].items():
+            alt_codon[offset] = alt
+            variant_ids[offset] = variant_id
+        alt_aa = _translate_codon_cached(''.join(alt_codon))
+        if alt_aa == '*':
+            return None
+        if alt_aa != ref_aa:
+            new_AA[codon_idx] = alt_aa
+            AA_index = codon_idx + 1
+            if frame != 0:
+                AA_index += 1
+            variants = ','.join(dict.fromkeys(v for v in variant_ids if pd.notnull(v)))
+            variant_AA.append(ref_aa + str(AA_index) + alt_aa + '({})'.format(variants))
+
+    tdc_result['new_AA'] = ''.join(new_AA)
+    if variant_AA:
+        tdc_result['n_variant_AA'] = len(variant_AA)
+        tdc_result['variant_AA'] = ';'.join(variant_AA)
+    if frame != 0:
+        tdc_result['new_AA'] = 'X' + tdc_result['new_AA']
+    tdc_result['new_AA'] = tdc_result['new_AA'].replace('_','*')
+    return tdc_result
+
+
 def _translate_codon_cached(codon):
     aa = _CODON_TRANSLATE_CACHE.get(codon)
     if aa is None:
@@ -766,6 +827,9 @@ def translateCDSplusWithMut(r, df_mutations):
     
     # if no special codon, translate directly
     if AA_seq in AA_translate:
+        direct_sparse_result = _direct_sparse_translation_result(tdc_result, transcript_id, df_CDSplus, tdf_m, AA_seq, frame)
+        if direct_sparse_result is not None:
+            return direct_sparse_result
         direct_inputs = _build_direct_translation_inputs(transcript_id, df_CDSplus, tdf_m)
         if direct_inputs is not None:
             new_nt, variant_ids = direct_inputs
