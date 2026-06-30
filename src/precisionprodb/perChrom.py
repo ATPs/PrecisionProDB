@@ -14,6 +14,7 @@ _CDSPLUS_CACHE = {}
 _CDSPLUS_KEY_INDEX_CACHE = {}
 _CDSPLUS_DIRECT_CACHE = {}
 _MUT_HELPER_CACHE = {}
+_MUTATION_RECORD_CACHE = {}
 _CODON_TRANSLATE_CACHE = {}
 
 
@@ -154,6 +155,38 @@ def _translate_alt_codons(codon_alt, codon_ref, aa_ref):
         ref_aa if alt == ref else _translate_codon_cached(alt)
         for alt, ref, ref_aa in zip(codon_alt, codon_ref, aa_ref)
     ]
+
+
+def _get_mutation_records(df_mutations, mutation, strand):
+    cache_key = (id(df_mutations), mutation, strand)
+    records = _MUTATION_RECORD_CACHE.get(cache_key)
+    if records is not None:
+        return records
+
+    r = df_mutations.loc[mutation]
+    chromosome = r['chr']
+    pos = r['pos']
+    ref = r['ref']
+    alt = r['alt']
+    variant_id = '{}-{}-{}-{}'.format(chromosome, pos, ref, alt)
+
+    records = []
+    if len(ref) == 1:
+        if strand == '+':
+            records.append([chromosome, pos, ref, alt, variant_id])
+        else:
+            records.append([chromosome, pos, f_rc(ref), f_rc(alt), variant_id])
+    else:
+        for n in range(1, len(ref)):
+            p = pos + n
+            ref_base = ref[n]
+            if strand == '+':
+                records.append([chromosome, p, ref_base, '', variant_id])
+            else:
+                records.append([chromosome, p, f_rc(ref_base), '', variant_id])
+
+    _MUTATION_RECORD_CACHE[cache_key] = records
+    return records
 
 
 def openFile(filename):
@@ -647,29 +680,9 @@ def getMut_helper(mutations, strand, df_mutations):
     if cache_key in _MUT_HELPER_CACHE:
         return _MUT_HELPER_CACHE[cache_key]
 
-    tdf_mut = df_mutations.loc[mutations]
-    tdf_mut['variant_id'] = tdf_mut.apply(lambda x:'{}-{}-{}-{}'.format(x['chr'], x['pos'], x['ref'], x['alt']),axis=1)
-    
     results = []
-    for row, r in tdf_mut.iterrows():
-        chromosome = r['chr']
-        pos = r['pos']
-        ref = r['ref']
-        alt = r['alt']
-        variant_id = r['variant_id']
-        if len(ref) == 1:
-            if strand == '+':
-                results.append([chromosome, pos, ref, alt, variant_id])
-            else:
-                results.append([chromosome, pos, f_rc(ref), f_rc(alt), variant_id])
-        else:
-            for n in range(1, len(ref)):
-                p = pos + n
-                r = ref[n]
-                if strand == '+':
-                    results.append([chromosome, p, r, '', variant_id])
-                else:
-                    results.append([chromosome, p, f_rc(r), '', variant_id])
+    for mutation in mutations:
+        results.extend(_get_mutation_records(df_mutations, mutation, strand))
     
     tdf_m = pd.DataFrame(results)
     tdf_m.columns = ['chr','pos','ref','alt','variant_id']
