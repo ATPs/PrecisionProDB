@@ -12,6 +12,7 @@ import re
 _PRINTED_WARNINGS = set()
 _CDSPLUS_CACHE = {}
 _CDSPLUS_KEY_INDEX_CACHE = {}
+_CDSPLUS_DIRECT_CACHE = {}
 _MUT_HELPER_CACHE = {}
 
 
@@ -57,6 +58,86 @@ def _merge_CDSplus_with_mutations(transcript_id, df_CDSplus, tdf_m):
         df_result.at[idx, 'alt'] = r['alt']
         df_result.at[idx, 'variant_id'] = r['variant_id']
     return df_result
+
+
+def _get_CDSplus_direct_cache(transcript_id, df_CDSplus):
+    if transcript_id not in _CDSPLUS_DIRECT_CACHE:
+        left_keys = ['chr', 'locs', 'bases']
+        has_duplicate_keys = df_CDSplus.duplicated(left_keys).any()
+        key_index = None
+        if not has_duplicate_keys:
+            key_index = {
+                (chromosome, loc, base): idx
+                for idx, (chromosome, loc, base) in enumerate(zip(df_CDSplus['chr'], df_CDSplus['locs'], df_CDSplus['bases']))
+            }
+        _CDSPLUS_DIRECT_CACHE[transcript_id] = {
+            'bases': tuple(df_CDSplus['bases']),
+            'key_index': key_index,
+            'has_duplicate_keys': has_duplicate_keys,
+        }
+    return _CDSPLUS_DIRECT_CACHE[transcript_id]
+
+
+def _build_direct_translation_inputs(transcript_id, df_CDSplus, tdf_m):
+    right_keys = ['chr', 'pos', 'ref']
+    direct_cache = _get_CDSplus_direct_cache(transcript_id, df_CDSplus)
+    if direct_cache['has_duplicate_keys'] or tdf_m.duplicated(right_keys).any():
+        return None
+
+    new_nt = list(direct_cache['bases'])
+    variant_ids = [np.nan] * len(new_nt)
+    key_index = direct_cache['key_index']
+    for r in tdf_m.itertuples(index=False):
+        idx = key_index.get((r.chr, r.pos, r.ref))
+        if idx is None:
+            continue
+        new_nt[idx] = r.alt
+        variant_ids[idx] = r.variant_id
+
+    # Match the existing start-codon deletion correction without materializing a DataFrame.
+    if len(new_nt) > 2 and new_nt[2] != '':
+        if new_nt[0] == '' or new_nt[1] == '':
+            _print_once_per_process(
+                ('start_codon_frame_shift_deletion', transcript_id),
+                transcript_id,
+                'special case: start codon frame shift deletion'
+            )
+        if new_nt[0] == '':
+            new_nt[0] = direct_cache['bases'][0]
+        if new_nt[1] == '':
+            new_nt[1] = direct_cache['bases'][1]
+
+    return new_nt, variant_ids
+
+
+def _direct_translation_result(tdc_result, AA_seq, frame, new_nt, variant_ids):
+    # AA_seq may be shorter than AA_translate, because for annotation, the sequence may end before the stop codon
+    CDSnew = ''.join(new_nt)
+    new_AA = str(Seq(CDSnew[:3*(len(CDSnew) // 3)]).translate().split('*')[0])
+    tdc_result['new_AA'] = new_AA
+    # no AA changed, return original sequence
+    if new_AA == AA_seq:
+        if frame != 0:
+            tdc_result['new_AA'] = 'X' + tdc_result['new_AA']
+        tdc_result['new_AA'] = tdc_result['new_AA'].replace('_','*')
+        return tdc_result
+    # only AA change
+    if len(new_AA) == len(AA_seq):
+        variant_AA = []
+        for n in range(len(AA_seq)):
+            if AA_seq[n] != new_AA[n]:
+                AA_index = n + 1
+                if frame != 0:
+                    AA_index += 1
+                variants = ','.join(dict.fromkeys(v for v in variant_ids[n*3:(n+1)*3] if pd.notnull(v)))
+                variant_AA.append(AA_seq[n] + str(AA_index) + new_AA[n] + '({})'.format(variants))
+        tdc_result['n_variant_AA'] = len(variant_AA)
+        tdc_result['variant_AA'] = ';'.join(variant_AA)
+        if frame != 0:
+            tdc_result['new_AA'] = 'X' + tdc_result['new_AA']
+        tdc_result['new_AA'] = tdc_result['new_AA'].replace('_','*')
+        return tdc_result
+    return None
 
 
 def openFile(filename):
@@ -630,7 +711,28 @@ def translateCDSplusWithMut(r, df_mutations):
     df_CDSplus, AA_seq, AA_ori, AA_translate, nonStandardStopCodon = _get_cached_CDSplus_for_transcript_id(r)
     tdc_result['nonStandardStopCodon'] = nonStandardStopCodon
     AA_len = len(AA_seq)
-    # include mutation data
+    
+    # if no special codon, translate directly
+    if AA_seq in AA_translate:
+        direct_inputs = _build_direct_translation_inputs(transcript_id, df_CDSplus, tdf_m)
+        if direct_inputs is not None:
+            new_nt, variant_ids = direct_inputs
+            direct_result = _direct_translation_result(tdc_result, AA_seq, frame, new_nt, variant_ids)
+            if direct_result is not None:
+                return direct_result
+    else:
+        if 'U' in AA_seq:
+            _print_once_per_process(
+                ('selenocysteine', transcript_id),
+                f'{transcript_id} with selenocysteine, special case'
+            )
+        else:
+            _print_once_per_process(
+                ('annotation_mismatch', transcript_id),
+                f'warning! protein {transcript_id}, the original provided protein sequence is {AA_seq} and translated protein sequence from the GTF annotation is {AA_translate}'
+            )
+            
+    # include mutation data only for complex/fallback cases
     df_CDSplus = _merge_CDSplus_with_mutations(transcript_id, df_CDSplus, tdf_m)
     # number of variant in CDSplus
     df_CDSplus['new_nt'] = df_CDSplus['alt'].where(df_CDSplus['alt'].notna(), df_CDSplus['bases'])
@@ -646,48 +748,12 @@ def translateCDSplusWithMut(r, df_mutations):
             df_CDSplus.loc[0, 'new_nt'] = df_CDSplus.iloc[0]['ref']
         if df_CDSplus.iloc[1]['new_nt'] == '':
             df_CDSplus.loc[1,'new_nt'] = df_CDSplus.iloc[1]['ref']
-    
-    # if no special codon, translate directly
-    if AA_seq in AA_translate:
-        # AA_seq may be shorter than AA_translate, because for annotation, the sequence may end before the stop codon
-        CDSnew = ''.join(df_CDSplus['new_nt'])
-        new_AA = str(Seq(CDSnew[:3*(len(CDSnew) // 3)]).translate().split('*')[0])
-        tdc_result['new_AA'] = new_AA
-        # no AA changed, return original sequence
-        if new_AA == AA_seq:
-            if frame != 0:
-                tdc_result['new_AA'] = 'X' + tdc_result['new_AA']
-            tdc_result['new_AA'] = tdc_result['new_AA'].replace('_','*')
-            return tdc_result
-        # only AA change
-        if len(new_AA) == len(AA_seq):
-            variant_AA = []
-            variant_ids = df_CDSplus['variant_id'].tolist()
-            for n in range(len(AA_seq)):
-                if AA_seq[n] != new_AA[n]:
-                    AA_index = n + 1
-                    if frame != 0:
-                        AA_index += 1
-                    variants = ','.join(dict.fromkeys(v for v in variant_ids[n*3:(n+1)*3] if pd.notnull(v)))
-                    variant_AA.append(AA_seq[n] + str(AA_index) + new_AA[n] + '({})'.format(variants))
-            tdc_result['n_variant_AA'] = len(variant_AA)
-            tdc_result['variant_AA'] = ';'.join(variant_AA)
-            if frame != 0:
-                tdc_result['new_AA'] = 'X' + tdc_result['new_AA']
-            tdc_result['new_AA'] = tdc_result['new_AA'].replace('_','*')
-            return tdc_result
-    else:
-        if 'U' in AA_seq:
-            _print_once_per_process(
-                ('selenocysteine', transcript_id),
-                f'{transcript_id} with selenocysteine, special case'
-            )
-        else:
-            _print_once_per_process(
-                ('annotation_mismatch', transcript_id),
-                f'warning! protein {transcript_id}, the original provided protein sequence is {AA_seq} and translated protein sequence from the GTF annotation is {AA_translate}'
-            )
-            
+
+    if AA_seq in AA_translate and direct_inputs is None:
+        direct_result = _direct_translation_result(tdc_result, AA_seq, frame, df_CDSplus['new_nt'], df_CDSplus['variant_id'].tolist())
+        if direct_result is not None:
+            return direct_result
+
     # translation with non-standard codons or complicate cases
     df_CDSref = df_CDSplus[['locs', 'bases', 'chr', 'strand','variant_id']].copy()
     df_CDSalt = df_CDSplus[['locs', 'new_nt', 'chr', 'strand','variant_id']].copy()
