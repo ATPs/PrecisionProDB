@@ -10,6 +10,9 @@ import numpy as np
 import re
 
 _PRINTED_WARNINGS = set()
+_CDSPLUS_CACHE = {}
+_CDSPLUS_KEY_INDEX_CACHE = {}
+_MUT_HELPER_CACHE = {}
 
 
 def _print_once_per_process(key, *args):
@@ -17,6 +20,43 @@ def _print_once_per_process(key, *args):
         return
     _PRINTED_WARNINGS.add(key)
     print(*args)
+
+
+def _get_cached_CDSplus_for_transcript_id(r):
+    transcript_id = r.name
+    if transcript_id not in _CDSPLUS_CACHE:
+        _CDSPLUS_CACHE[transcript_id] = create_df_CDSplus_for_transcript_id(r)
+    df_CDSplus, AA_seq, AA_ori, AA_translate, nonStandardStopCodon = _CDSPLUS_CACHE[transcript_id]
+    return df_CDSplus, AA_seq, AA_ori, AA_translate, nonStandardStopCodon
+
+
+def _merge_CDSplus_with_mutations(transcript_id, df_CDSplus, tdf_m):
+    left_keys = ['chr', 'locs', 'bases']
+    right_keys = ['chr', 'pos', 'ref']
+    if df_CDSplus.duplicated(left_keys).any() or tdf_m.duplicated(right_keys).any():
+        return df_CDSplus.merge(tdf_m, how='left', left_on=left_keys, right_on=right_keys)
+
+    if transcript_id not in _CDSPLUS_KEY_INDEX_CACHE:
+        _CDSPLUS_KEY_INDEX_CACHE[transcript_id] = {
+            (r['chr'], r['locs'], r['bases']): idx
+            for idx, r in df_CDSplus.iterrows()
+        }
+    key_index = _CDSPLUS_KEY_INDEX_CACHE[transcript_id]
+
+    df_result = df_CDSplus.copy()
+    df_result['pos'] = np.nan
+    df_result['ref'] = pd.Series(np.nan, index=df_result.index, dtype=object)
+    df_result['alt'] = pd.Series(np.nan, index=df_result.index, dtype=object)
+    df_result['variant_id'] = pd.Series(np.nan, index=df_result.index, dtype=object)
+    for _, r in tdf_m.iterrows():
+        idx = key_index.get((r['chr'], r['pos'], r['ref']))
+        if idx is None:
+            continue
+        df_result.at[idx, 'pos'] = r['pos']
+        df_result.at[idx, 'ref'] = r['ref']
+        df_result.at[idx, 'alt'] = r['alt']
+        df_result.at[idx, 'variant_id'] = r['variant_id']
+    return df_result
 
 
 def openFile(filename):
@@ -483,6 +523,9 @@ def getMut_helper(mutations, strand, df_mutations):
     for substitution or insertion, no change for forward, and reverse completement for reverse strand
     for deletion, change so that ref include only one AA, alt change to empty
     '''
+    cache_key = (id(df_mutations), tuple(mutations), strand)
+    if cache_key in _MUT_HELPER_CACHE:
+        return _MUT_HELPER_CACHE[cache_key]
 
     tdf_mut = df_mutations.loc[mutations]
     tdf_mut['variant_id'] = tdf_mut.apply(lambda x:'{}-{}-{}-{}'.format(x['chr'], x['pos'], x['ref'], x['alt']),axis=1)
@@ -510,6 +553,7 @@ def getMut_helper(mutations, strand, df_mutations):
     
     tdf_m = pd.DataFrame(results)
     tdf_m.columns = ['chr','pos','ref','alt','variant_id']
+    _MUT_HELPER_CACHE[cache_key] = tdf_m
     return tdf_m
 
 
@@ -583,11 +627,11 @@ def translateCDSplusWithMut(r, df_mutations):
     mutations = r['mutations']
     tdf_m = getMut_helper(mutations, strand, df_mutations)
     
-    df_CDSplus, AA_seq, AA_ori, AA_translate, nonStandardStopCodon = create_df_CDSplus_for_transcript_id(r)
+    df_CDSplus, AA_seq, AA_ori, AA_translate, nonStandardStopCodon = _get_cached_CDSplus_for_transcript_id(r)
     tdc_result['nonStandardStopCodon'] = nonStandardStopCodon
     AA_len = len(AA_seq)
     # include mutation data
-    df_CDSplus = df_CDSplus.merge(tdf_m, how='left', left_on = ['chr','locs', 'bases'], right_on=['chr','pos','ref'])
+    df_CDSplus = _merge_CDSplus_with_mutations(transcript_id, df_CDSplus, tdf_m)
     # number of variant in CDSplus
     df_CDSplus['new_nt'] = df_CDSplus['alt'].where(df_CDSplus['alt'].notna(), df_CDSplus['bases'])
     # in two cases for gencode, the deletion is in the start codon, making the code not working. So if there is deletion in the start codon, making the first three new_nt unchanged
@@ -617,17 +661,17 @@ def translateCDSplusWithMut(r, df_mutations):
             return tdc_result
         # only AA change
         if len(new_AA) == len(AA_seq):
-            t_alt = pd.DataFrame()
+            variant_AA = []
+            variant_ids = df_CDSplus['variant_id'].tolist()
             for n in range(len(AA_seq)):
                 if AA_seq[n] != new_AA[n]:
-                    t_alt.loc[n, 'AA_ref'] = AA_seq[n]
-                    t_alt.loc[n, 'AA_alt'] = new_AA[n]
-                    t_alt.loc[n, 'AA_index'] = n + 1
-                    t_alt.loc[n, 'variants'] = ','.join(df_CDSplus.iloc[n*3:(n+1)*3]['variant_id'].dropna().drop_duplicates())
-            if frame !=0: 
-                t_alt['AA_index'] = t_alt['AA_index'] + 1
-            tdc_result['n_variant_AA'] = t_alt.shape[0]
-            tdc_result['variant_AA'] = ';'.join(t_alt.apply(lambda x:x['AA_ref'] + str(int(x['AA_index'])) + x['AA_alt'] + '({})'.format(x['variants']), axis=1))
+                    AA_index = n + 1
+                    if frame != 0:
+                        AA_index += 1
+                    variants = ','.join(dict.fromkeys(v for v in variant_ids[n*3:(n+1)*3] if pd.notnull(v)))
+                    variant_AA.append(AA_seq[n] + str(AA_index) + new_AA[n] + '({})'.format(variants))
+            tdc_result['n_variant_AA'] = len(variant_AA)
+            tdc_result['variant_AA'] = ';'.join(variant_AA)
             if frame != 0:
                 tdc_result['new_AA'] = 'X' + tdc_result['new_AA']
             tdc_result['new_AA'] = tdc_result['new_AA'].replace('_','*')
