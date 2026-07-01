@@ -29,6 +29,87 @@ def openFile(filename):
     return open(filename)
 
 
+def strip_vcf_suffix(filename):
+    '''Return a basename suitable for sample naming by removing common VCF suffixes.'''
+    base_name = os.path.basename(filename)
+    for suffix in ('.vcf.gz', '.vcf', '.gz'):
+        if base_name.lower().endswith(suffix):
+            return base_name[:-len(suffix)]
+    return os.path.splitext(base_name)[0]
+
+
+def is_manifest_file(file_input):
+    '''Return True when an existing TSV-like file uses filepath as the first header column.'''
+    if not os.path.exists(file_input):
+        return False
+    try:
+        with openFile(file_input) as fo:
+            header = fo.readline().rstrip('\n\r').split('\t')
+    except Exception:
+        return False
+    return len(header) > 0 and header[0] == 'filepath'
+
+
+def get_vcf_samples(file_vcf):
+    '''Read the #CHROM header and return sample names from a VCF/VCF.GZ file.'''
+    with openFile(file_vcf) as fo:
+        for line in fo:
+            if line.startswith('#CHROM'):
+                columns = line.rstrip('\n\r').split('\t')
+                return columns[9:]
+    raise ValueError(f'#CHROM header line not found in {file_vcf}')
+
+
+def read_vcf_manifest(file_manifest):
+    '''Parse a VCF manifest and resolve one unique output sample name per row.'''
+    pd = _import_pandas()
+    df_manifest = pd.read_csv(file_manifest, sep='\t', keep_default_na=False)
+    if df_manifest.shape[1] == 0 or df_manifest.columns[0] != 'filepath':
+        raise ValueError('manifest TSV must have header and first column named filepath')
+    if df_manifest.shape[0] == 0:
+        raise ValueError('manifest TSV has no input rows')
+
+    rows = []
+    for row_index, row in df_manifest.iterrows():
+        file_vcf = str(row['filepath']).strip()
+        if file_vcf == '':
+            raise ValueError(f'empty filepath in manifest row {row_index + 2}')
+        if not os.path.exists(file_vcf):
+            raise FileNotFoundError(f'manifest filepath not found: {file_vcf}')
+        if not (file_vcf.lower().endswith('.vcf') or file_vcf.lower().endswith('.vcf.gz')):
+            raise ValueError(f'manifest filepath must point to a VCF/VCF.GZ file in this version: {file_vcf}')
+        samples = get_vcf_samples(file_vcf)
+        if not samples:
+            raise ValueError(f'no sample columns found in {file_vcf}')
+        sample = str(row['sample']).strip() if 'sample' in df_manifest.columns else ''
+        if sample == '':
+            sample = samples[0]
+            print(f'Warning: sample not provided for {file_vcf}; using first sample {sample}')
+        if sample not in samples:
+            raise ValueError(f'sample {sample} not found in {file_vcf}')
+        sample_col = 9 + samples.index(sample)
+        name_use = str(row['name_use']).strip() if 'name_use' in df_manifest.columns else ''
+        if name_use == '':
+            name_use = sample
+        rows.append({'filepath': file_vcf, 'sample': sample, 'sample_col': sample_col, 'name_use': name_use})
+
+    names = [row['name_use'] for row in rows]
+    duplicate_names = {name for name in names if names.count(name) > 1}
+    if duplicate_names:
+        print('Warning: duplicated sample names in manifest output:', ','.join(sorted(duplicate_names)))
+        print('Warning: using VCF file names as sample names for duplicated entries.')
+        for row in rows:
+            if row['name_use'] in duplicate_names:
+                row['name_use'] = strip_vcf_suffix(row['filepath'])
+
+    names = [row['name_use'] for row in rows]
+    duplicate_names = {name for name in names if names.count(name) > 1}
+    if duplicate_names:
+        raise ValueError('duplicated sample names remain after using file names; please provide unique name_use values: ' + ','.join(sorted(duplicate_names)))
+
+    return rows
+
+
 def openVCFStreamFast(filename, threads=1):
     '''Open VCF text stream, using external parallel gzip decompression when available.'''
     if not filename.endswith('.gz'):
@@ -472,6 +553,101 @@ def convertVCF2MutationComplexStream(file_vcf, fout, individual_col, chromosome_
         pool.join()
 
 
+def process_manifest_row_python(task):
+    '''Convert one manifest row/VCF into variant keys and two allele-presence bits.'''
+    row_index, row, chromosome_only, filter_PASS, info_field, info_field_thres = task
+    individual_col = [row['sample_col']]
+    row_values = {}
+    for line in iter_vcf_records(row['filepath'], threads=1):
+        new_lines = processOneLineOfVCF(line, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, CHROMOSOMES, row['filepath'])
+        if not new_lines:
+            continue
+        for new_line in new_lines.rstrip('\n').split('\n'):
+            fields = new_line.split('\t')
+            key = tuple(fields[:4])
+            values = fields[4:]
+            if key not in row_values:
+                row_values[key] = ['0', '0']
+            for offset, value in enumerate(values[:2]):
+                if value == '1':
+                    row_values[key][offset] = '1'
+    return row_index, row['filepath'], row_values
+
+
+def merge_manifest_row_values(variant_to_values, row_index, row_values, n_columns):
+    '''Merge one manifest worker result into the population allele matrix.'''
+    column_offset = row_index * 2
+    for key, values in row_values.items():
+        if key not in variant_to_values:
+            variant_to_values[key] = ['0'] * n_columns
+        for offset, value in enumerate(values[:2]):
+            if value == '1':
+                variant_to_values[key][column_offset + offset] = '1'
+
+
+def convert_manifest_with_python(rows, file_output, file_output_done, filter_PASS=True, chromosome_only=True, info_field=None, info_field_thres=None, threads=1):
+    '''Convert manifest VCF rows directly into a population mutation TSV matrix.'''
+    column_for_samples = []
+    for row in rows:
+        column_for_samples.append(row['name_use'] + '__1')
+        column_for_samples.append(row['name_use'] + '__2')
+    variant_to_values = {}
+    n_columns = len(column_for_samples)
+    tasks = [(row_index, row, chromosome_only, filter_PASS, info_field, info_field_thres) for row_index, row in enumerate(rows)]
+    if threads > 1 and len(tasks) > 1:
+        pool = Pool(min(threads, len(tasks)))
+        try:
+            results = pool.imap_unordered(process_manifest_row_python, tasks, chunksize=1)
+            if tqdm:
+                results = tqdm.tqdm(results, total=len(tasks), desc='manifest vcf converting to tsv')
+            for row_index, file_vcf, row_values in results:
+                merge_manifest_row_values(variant_to_values, row_index, row_values, n_columns)
+                print('finish converting vcf file:', file_vcf)
+        finally:
+            pool.close()
+            pool.join()
+    else:
+        to_iter = tasks
+        if tqdm:
+            to_iter = tqdm.tqdm(to_iter, total=len(tasks), desc='manifest vcf converting to tsv')
+        for task in to_iter:
+            row_index, file_vcf, row_values = process_manifest_row_python(task)
+            merge_manifest_row_values(variant_to_values, row_index, row_values, n_columns)
+            print('finish converting vcf file:', file_vcf)
+
+    with open(file_output, 'w') as fout:
+        fout.write('\t'.join(['chr', 'pos', 'ref', 'alt'] + column_for_samples) + '\n')
+        for key in sorted(variant_to_values, key=lambda x: (x[0], int(x[1]) if str(x[1]).isdigit() else x[1], x[2], x[3])):
+            fout.write('\t'.join(list(key) + variant_to_values[key]) + '\n')
+    open(file_output_done, 'w').write('\n'.join(column_for_samples))
+    return column_for_samples
+
+
+def convertVCFManifest2MutationComplex(file_manifest, outprefix=None, filter_PASS=True, chromosome_only=True, info_field=None, info_field_thres=None, threads=1):
+    '''Convert a filepath manifest into the same population TSV produced from multi-sample VCF input.'''
+    rows = read_vcf_manifest(file_manifest)
+    if outprefix is None:
+        file_output = strip_vcf_suffix(file_manifest) + '.tsv'
+        outprefix = os.path.splitext(file_output)[0]
+        print(f"Output prefix not specified, writing to '{file_output}'")
+    else:
+        file_output = outprefix + '.tsv'
+    file_output_done = file_output + '.done'
+    if os.path.exists(file_output_done):
+        print(f"Output file '{file_output}' already exists. Skipping.")
+        return open(file_output_done, 'r').read().strip().split()
+
+    if info_field:
+        try:
+            info_field_thres = float(info_field_thres)
+        except ValueError:
+            print(f"Error: --info_field_thres ('{info_field_thres}') must be a number.")
+            return []
+
+    print('use Python parser for manifest VCF files.')
+    return convert_manifest_with_python(rows, file_output, file_output_done, filter_PASS, chromosome_only, info_field, info_field_thres, threads)
+
+
 
 def tsv2memmap(tsv_file, individuals = None, memmap_file=None, batch_size=100):
     '''tsv file is a tsv file with columns: chr, pos, ref, sample1__1, sample1__2, sample2__1, sample2__2, ..., sampleN__1, sampleN__2 columns
@@ -648,6 +824,9 @@ def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL
     info_field_thres is the threshold of the INFO field key used to filter. In ProHap, the default setting is 0.01
     
     '''
+    if is_manifest_file(file_vcf):
+        return convertVCFManifest2MutationComplex(file_vcf, outprefix, filter_PASS, chromosome_only, info_field, info_field_thres, threads)
+
     if ',' in file_vcf:
         files_vcf = file_vcf.split(',')
     elif os.path.exists(file_vcf):
@@ -734,14 +913,14 @@ Otherwise, PrecisionProDB version 2.0 mode. Output a single file with extra colu
 def main():
     import argparse
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('-i', '--file_vcf', help='''input vcf file. It can be a gzip file. If multiple vcf files are provided, use "," to join the file names. For example, "--file_vcf file1.vcf,file2.vcf". A pattern match is also supported, but quote is required to get it work. For example '--file_vcf "file*.vcf"' ''', required=True)
+    parser.add_argument('-i', '--file_vcf', help='''input vcf file. It can be a gzip file. If multiple vcf files are provided, use "," to join the file names. For example, "--file_vcf file1.vcf,file2.vcf". A pattern match is also supported, but quote is required to get it work. For example '--file_vcf "file*.vcf"'. A TSV manifest with first header column "filepath" is also supported for one-VCF-per-sample population mode. Optional manifest columns: sample, name_use. ''', required=True)
     parser.add_argument('-o', '--outprefix', help='output prefix to store the two output dataframes, default: None, do not write the result to files. file will be outprefix_1/2.tsv', default=None)
     parser.add_argument('-s', '--sample', help='sample name in the vcf to extract the variant information. default: None, extract the first sample. For multiple samples, use "," to join the sample names. For example, "--sample sample1,sample2,sample3". To use all samples, use "--sample ALL_SAMPLES". To use all variants regardless where the variants from, use "--sample ALL_VARIANTS".', default=None)
     parser.add_argument('-F', '--no_filter', help='default only keep variant with value "PASS" FILTER column of vcf file. if set, do not filter', action='store_true')
     parser.add_argument('-A','--all_chromosomes', help='default keep variant in chromosomes and ignore those in short fragments of the genome. if set, use all chromosomes including fragments', action='store_true')
     parser.add_argument('--info_field', help='fields to use in the INFO column of the vcf file to filter variants. Default None', default = None)
     parser.add_argument('--info_field_thres', help='threhold for the info field. Default None, do not filter any variants. If set "--info_filed AF --info_field_thres 0.01", only keep variants with AF >= 0.01', default = None)
-    parser.add_argument('-t', '--threads', help='number of threads/CPUs to run the program. default, 1', type=int, default=1)
+    parser.add_argument('-t', '--threads', help='number of threads/CPUs to run the program. default, 1. For manifest input, VCF files are parsed in parallel across manifest rows.', type=int, default=1)
 
     f = parser.parse_args()
     chromosome_only = not f.all_chromosomes
@@ -749,7 +928,10 @@ def main():
     sample = f.sample
     #print(f)
     
-    if sample is None:
+    if is_manifest_file(f.file_vcf):
+        print('convert manifest VCF list to mutation information in version 2.0 mode')
+        convertVCF2MutationComplex(file_vcf = f.file_vcf, outprefix = f.outprefix, individual_input='ALL_SAMPLES', filter_PASS = filter_PASS, chromosome_only = chromosome_only, info_field = f.info_field, info_field_thres = f.info_field_thres, threads = f.threads)
+    elif sample is None:
         print('convert vcf to mutation information in version 1.0 mode')
         getMutationsFromVCF(file_vcf = f.file_vcf, outprefix = f.outprefix, individual=f.sample, filter_PASS = filter_PASS, chromosome_only = chromosome_only)
     elif ',' in  sample or sample == 'ALL_SAMPLES' or sample == 'ALL_VARIANTS':

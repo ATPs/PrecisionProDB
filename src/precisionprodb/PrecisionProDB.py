@@ -8,11 +8,13 @@ if __package__:
     from . import downloadHuman
     from .PrecisionProDB_core import PerGeno
     from .PrecisionProDB_vcf import runPerGenoVCF
+    from .vcf2mutation import is_manifest_file
 else:
     import buildSqlite
     import downloadHuman
     from PrecisionProDB_core import PerGeno
     from PrecisionProDB_vcf import runPerGenoVCF
+    from vcf2mutation import is_manifest_file
 
 def get_version():
     """Read version from version file"""
@@ -39,6 +41,7 @@ def main():
                         If the file ends with ".vcf" or ".vcf.gz", treat as vcf input. Otherwise, treat as TSV input. 
                         A string like "chr1-788418-CAG-C" or "chr1-942451-T-C,1-6253878-C-T,1-2194700-C-G" can used as variant input, too. In this mode, --sample will not be used.
                         If multiple vcf files are provided, use "," to join the file names. For example, "--mutations file1.vcf,file2.vcf". A pattern match is also supported for input vcf, but quote is required to get it work. For example '--mutations "file*.vcf" ' 
+                        A TSV manifest with first header column "filepath" is supported for one-VCF-per-sample population mode. Optional manifest columns: sample, name_use.
                         
                         ''', default = '', required=False)
     parser.add_argument('-p','--protein', help = 'protein sequences in fasta format. It can be a gzip file. Only proteins in this file will be checked', default='')
@@ -144,7 +147,7 @@ def main():
         if file_sqlite == '':
             print(f'sample is set to {individual}. In this case, --sqlite must be set. exit...')
             sys.exit()
-    if ',' in file_mutations or '*' in file_mutations:
+    if ',' in file_mutations or '*' in file_mutations or is_manifest_file(file_mutations):
         if file_sqlite == '':
             print(f'mutations is set to {file_mutations}. In this case, --sqlite must be set. exit...')
             sys.exit()

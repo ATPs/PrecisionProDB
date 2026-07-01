@@ -228,14 +228,14 @@ def runPerChomSqlite_vcf(file_mutations, file_sqlite, threads, outprefix, dataty
     '''
     if __package__:
         from .PrecisionProDB_vcf import readProtein2DF, openFile
-        from .vcf2mutation import convertVCF2MutationComplex
+        from .vcf2mutation import convertVCF2MutationComplex, is_manifest_file
     else:
         from PrecisionProDB_vcf import readProtein2DF, openFile
-        from vcf2mutation import convertVCF2MutationComplex
+        from vcf2mutation import convertVCF2MutationComplex, is_manifest_file
     # get two mutation files from vcf file
     print('start extracting mutation file from the vcf input')
     outprefix_vcf = outprefix + '.vcf2mutation'
-    force_memmap = (individual == 'ALL_SAMPLES')
+    force_memmap = (individual == 'ALL_SAMPLES' or is_manifest_file(file_mutations))
     individual = convertVCF2MutationComplex(file_vcf = file_mutations, outprefix = outprefix_vcf, individual_input=individual, filter_PASS = filter_PASS, chromosome_only = chromosome_only, info_field = info_field, info_field_thres=info_field_thres, threads = threads)
     individual = ','.join(individual)
     print('finished extracting mutations from the vcf file')
@@ -343,6 +343,10 @@ def main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protei
     conn.close()
     chromosomes_genome_description = list(df_chromosomes['chromosomes_genome_description'])
     chromosomes_genome = list(df_chromosomes['chromosome'])
+    if __package__:
+        from .vcf2mutation import is_manifest_file
+    else:
+        from vcf2mutation import is_manifest_file
 
     # run if file_mutations is a single variant
     pattern = re.compile(r'(chr)?(\d+)-(\d+)-([A-Za-z]+)-([A-Za-z]+)')
@@ -383,7 +387,7 @@ def main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protei
             os.rename(outprefix + '.mutated_protein.fa',outprefix + '.pergeno.mutated_protein.fa')
         print('finished!')
         
-    elif file_mutations.lower().endswith('.vcf') or file_mutations.lower().endswith('.vcf.gz'):
+    elif file_mutations.lower().endswith('.vcf') or file_mutations.lower().endswith('.vcf.gz') or is_manifest_file(file_mutations):
         print('variant file is a vcf file')
         runPerChomSqlite_vcf(
             file_mutations = file_mutations, 
@@ -437,6 +441,7 @@ def main():
                         If the file ends with ".vcf" or ".vcf.gz", treat as vcf input. Otherwise, treat as TSV input. 
                         a string like "chr1-788418-CAG-C" or "chr1-942451-T-C,1-6253878-C-T,1-2194700-C-G" can used as variant input, too. In this mode, --sample will not be used.
                         If multiple vcf files are provided, use "," to join the file names. For example, "--mutations file1.vcf,file2.vcf". A pattern match is also supported for input vcf, but quote is required to get it work. For example '--mutations "file*.vcf" ' 
+                        A TSV manifest with first header column "filepath" is supported for one-VCF-per-sample population mode. Optional manifest columns: sample, name_use.
                         
                         ''', default = '', required=False)
     parser.add_argument('-p','--protein', help = 'protein sequences in fasta format. It can be a gzip file. Only proteins in this file will be checked', default='')
