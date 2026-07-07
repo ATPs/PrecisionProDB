@@ -4,12 +4,14 @@ import sys
 import re
 
 if __package__:
+    from .args import add_argument_set
     from . import buildSqlite
     from . import downloadHuman
     from .PrecisionProDB_core import PerGeno
     from .PrecisionProDB_vcf import runPerGenoVCF
     from .vcf2mutation import is_manifest_file
 else:
+    from args import add_argument_set
     import buildSqlite
     import downloadHuman
     from PrecisionProDB_core import PerGeno
@@ -30,46 +32,28 @@ PrecisionProDB, a personal proteogenomic tool which outputs a new reference prot
 A VCF or /a tsv file can be used as the variant input. If the variant file is in tsv format, at least four columns are required in the header: chr, pos, ref, alt. Additional columns will be ignored. Try to Convert the file to proper format if you have a bed file or other types of variant file. The pos column is 1-based like in the vcf file.
 Additionally, a string like "chr1-788418-CAG-C" can used as variant input. It has to be combined with the --sqlite for quick check of the mutation effects
 '''
-def main():
+
+
+def build_parser():
     import argparse
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('-v', '--version', action='version', version=f'PrecisionProDB {get_version()}')
-    parser.add_argument('-g','--genome', help = 'the reference genome sequence in fasta format. It can be a gzip file', default='')
-    parser.add_argument('-f', '--gtf', help='gtf file with CDS and exon annotations. It can be a gzip file', default='')
-    parser.add_argument('-m', '--mutations', help='''
-                        a file stores the variants. 
-                        If the file ends with ".vcf" or ".vcf.gz", treat as vcf input. Otherwise, treat as TSV input. 
-                        A string like "chr1-788418-CAG-C" or "chr1-942451-T-C,1-6253878-C-T,1-2194700-C-G" can used as variant input, too. In this mode, --sample will not be used.
-                        If multiple vcf files are provided, use "," to join the file names. For example, "--mutations file1.vcf,file2.vcf". A pattern match is also supported for input vcf, but quote is required to get it work. For example '--mutations "file*.vcf" ' 
-                        A TSV manifest with first header column "filepath" is supported for one-VCF-per-sample population mode. Optional manifest columns: sample, name_use.
-                        
-                        ''', default = '', required=False)
-    parser.add_argument('-p','--protein', help = 'protein sequences in fasta format. It can be a gzip file. Only proteins in this file will be checked', default='')
-    parser.add_argument('-t', '--threads', help='number of threads/CPUs to run the program. default, use 20 or all CPUs available, whichever is smaller', type=int, default=min(20, os.cpu_count()))
-    parser.add_argument('-o', '--out', help='''output prefix, folder path could be included. Three or five files will be saved depending on the variant file format. Outputs include the annotation for mutated transcripts, the mutated or all protein sequences, two variant files from vcf. {out}.pergeno.aa_mutations.csv, {out}.pergeno.protein_all.fa, {out}.protein_changed.fa, {out}.vcf2mutation_1/2.tsv. default "perGeno" ''', default="perGeno")
-    parser.add_argument('-a', '--datatype', help='''input datatype, could be GENCODE_GTF, GENCODE_GFF3, RefSeq, Ensembl_GTF or gtf. default "gtf". Ensembl_GFF3 is not supported. ''', default='gtf', type=str, choices=['GENCODE_GTF', 'GENCODE_GFF3','RefSeq','Ensembl_GTF','gtf'])
-    parser.add_argument('-k','--protein_keyword', help='''field name in attribute column of gtf file to determine ids for proteins. default "auto", determine the protein_keyword based on datatype. "transcript_id" for GENCODE_GTF, "protein_id" for "RefSeq" and "Parent" for gtf and GENCODE_GFF3 ''', default='auto')
-    parser.add_argument('-F', '--no_filter', help='default only keep variant with value "PASS" FILTER column of vcf file. if set, do not filter', action='store_true')
-    parser.add_argument('-s', '--sample', help='''
-                        sample name in the vcf/tsv to extract the variant information. default: None, extract the first sample in vcf file, or use all variants in the tsv file. 
-                        For multiple samples, use "," to join the sample names. For example, "--sample sample1,sample2,sample3". 
-                        To use all samples, use "--sample ALL_SAMPLES". 
-                        To use all variants regardless where the variants from, use "--sample ALL_VARIANTS".
-                        ''', default=None)
-    parser.add_argument('-A','--all_chromosomes', help='default keep variant in chromosomes and ignore those in short fragments of the genome. if set, use all chromosomes including fragments when parsing the vcf file', action='store_true')
-    parser.add_argument('-D','--download', help='''download could be 'GENCODE','RefSeq','Ensembl','Uniprot', 'CHM13'. If set, PrecisonProDB will try to download genome, gtf and protein files from the Internet. Download will be skipped if "--genome, --gtf, --protein, (--uniprot)" were all set. Settings from "--genome, --gtf, --protein, (--uniprot), --datatype" will not be used if the files were downloaded by PrecisonProDB. default "". Note, if --sqlite is set, will not download any files ''', default='', type=str, choices=['GENCODE','RefSeq','Ensembl','Uniprot','CHM13',''])
-    parser.add_argument('-U','--uniprot', help='''uniprot protein sequences. If more than one file, use "," to join the files. default "". For example, "UP000005640_9606.fasta.gz", or "UP000005640_9606.fasta.gz,UP000005640_9606_additional.fasta" ''', default='', type=str)
-    parser.add_argument('--uniprot_min_len', help='''minimum length required when matching uniprot sequences to proteins annotated in the genome. default 20 ''', default=20, type=int)
-    parser.add_argument('--PEFF', help='If set, PEFF format file(s) will be generated. Default: do not generate PEFF file(s).', action='store_true')
-    parser.add_argument('--keep_all', help='If set, do not delete files generated during the run', action='store_true')
+    add_argument_set(
+        parser,
+        'reference_inputs',
+        'variant_input_detailed',
+        'runtime_output',
+        'annotation',
+        'vcf_selection_mixed',
+        'download_uniprot',
+        'cleanup',
+        'sqlite',
+        'vcf_info_filters',
+    )
+    return parser
 
-    parser.add_argument('-S','--sqlite', help='''A path of sqlite file for re-use of annotation info. default outprefix + '.sqlite'. The program will create a sqlite file if the file does not exist. If the file already exists, the program will use data stored in the file. It will cause error if the content in the sqlite file is not as expected. To disable sqlite, set to "NONE". ''', default='', type=str)
-    parser.add_argument('--info_field', help='fields to use in the INFO column of the vcf file to filter variants. Default None', default = None)
-    parser.add_argument('--info_field_thres', help='threhold for the info field. Default None, do not filter any variants. If set "--info_filed AF --info_field_thres 0.01", only keep variants with AF >= 0.01', default = None)
 
-    
-    f = parser.parse_args()
-    
+def run_from_args(f):
     file_genome = f.genome
     file_gtf = f.gtf
     file_mutations = f.mutations
@@ -83,7 +67,7 @@ def main():
     chromosome_only = not f.all_chromosomes
     download = f.download
     files_uniprot = f.uniprot
-    uniprot_min_len=f.uniprot_min_len
+    uniprot_min_len = f.uniprot_min_len
     keep_all = f.keep_all
     file_sqlite = f.sqlite
     print(f)
@@ -231,6 +215,12 @@ def main():
 
 
     print('PrecisionProDB finished! Total seconds:', time.time() - time0)
+
+
+def main(argv=None):
+    parser = build_parser()
+    run_from_args(parser.parse_args(argv))
+
 
 if __name__ == '__main__':
     main()

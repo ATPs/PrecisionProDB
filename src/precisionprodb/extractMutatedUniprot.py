@@ -1,6 +1,11 @@
 from Bio import SeqIO
 import pandas as pd
 
+if __package__:
+    from .args import add_argument_set
+else:
+    from args import add_argument_set
+
 # files_uniprot = '/projectsp/f_jx76_1/xiaolong/2020humanRefPr/Uniprot/20201212Test/UP000005640_9606.fasta.gz,/projectsp/f_jx76_1/xiaolong/2020humanRefPr/Uniprot/20201212Test/UP000005640_9606_additional.fasta.gz'
 # files_ref = '/projectsp/f_jx76_1/xiaolong/genome/human/Ensembl/101/Homo_sapiens.GRCh38.pep.all.fa.gz,/projectsp/f_jx76_1/xiaolong/genome/human/GENCODE/GRCh38.p13_release35/gencode.v35.pc_translations.fa.gz'
 # files_alt = '/projectsp/f_jx76_1/xiaolong/2020humanRefPr/Ensembl/20201119EthnicProteins/Ensembl_adj.pergeno.protein_all.fa,/projectsp/f_jx76_1/xiaolong/2020humanRefPr/GENCODE/20201119EthnicProteins/GENCODE_adj.pergeno.protein_all.fa'
@@ -101,21 +106,16 @@ Output mutated proteins in files_alt.
 write three files, outprefix + '.uniprot_changed.tsv'/'.uniprot_changed.fa'/'.uniprot_all.fa'
 '''
 
-def main():
+def build_parser():
     import argparse
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('-u','--files_uniprot', help = 'uniprot proteins. If more than one files, join by ","', required=True)
-    parser.add_argument('-r', '--files_ref', help='reference proteins to match with uniprot proteins. If more than one files, join by ","')
-    parser.add_argument('-a', '--files_alt', help='altered reference proteins. If more than one files, join by ",". The order should be the same as files_ref')
-    parser.add_argument('-o', '--outprefix', help='prefix for output files. default:"perGeno"', default='perGeno')
-    parser.add_argument('-m', '--length_min', help='minumum length required when matching UniProt sequences with sequences in files_ref. default: "20"', default=20, type=int)
-    f = parser.parse_args()
-    
-    files_uniprot = f.files_uniprot
-    files_ref = f.files_ref
-    files_alt = f.files_alt
-    outprefix = f.outprefix
-    length_min = f.length_min
-    extractMutatedUniprot(files_uniprot, files_ref, files_alt, outprefix, length_min = length_min)
+    add_argument_set(parser, 'uniprot_matching')
+    return parser
+
+
+def main(argv=None):
+    f = build_parser().parse_args(argv)
+    extractMutatedUniprot(f.files_uniprot, f.files_ref, f.files_alt, f.outprefix, length_min = f.length_min)
+
 if __name__ == '__main__':
     main()

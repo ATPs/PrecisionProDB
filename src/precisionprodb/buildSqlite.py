@@ -13,9 +13,11 @@ import numpy as np
 from multiprocessing import Pool
 
 if __package__:
+    from .args import add_argument_set
     from .PrecisionProDB_core import PerGeno
     from .perChrom import PerChrom
 else:
+    from args import add_argument_set
     from PrecisionProDB_core import PerGeno
     from perChrom import PerChrom
 
@@ -801,25 +803,33 @@ def get_genomicLocs_chromosomes(file_sqlite):
     
 
 description = '''create a sqlite file for PrecisionProDB.'''
-def main():
-    
+
+
+def build_parser():
     import argparse
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('-S', '--sqlite', help='SQLite file with CDS and exon annotations', required=True)
-    parser.add_argument('-g', '--genome', help='Path to the genome fasta file', required=True)
-    parser.add_argument('-p', '--protein', help='Path to the protein sequences file', required=True)
-    parser.add_argument('-f', '--gtf', help='Path to the GTF file with gene annotations', required=True)
-    parser.add_argument('-o', '--out', help='''output prefix. used to store temp files. default "perGeno" ''', default="perGeno")
-    parser.add_argument('-a', '--datatype', help='''input datatype, could be GENCODE_GTF, GENCODE_GFF3, RefSeq, Ensembl_GTF or gtf. default "gtf". Ensembl_GFF3 is not supported. ''', default='gtf', type=str, choices=['GENCODE_GTF', 'GENCODE_GFF3','RefSeq','Ensembl_GTF','gtf'])
-    parser.add_argument('-k', '--protein_keyword', help='field name in attribute column of gtf file to determine ids for proteins. default "auto", determine the protein_keyword based on datatype. "transcript_id" for GENCODE_GTF, "protein_id" for "RefSeq" and "Parent" for gtf and GENCODE_GFF3', default='auto')
-    parser.add_argument('--keep_all', help='If set, do not delete files generated during the run', action='store_true')
-    parser.add_argument('-t', '--threads', help='number of threads/CPUs to run the program. default, use all CPUs available', type=int, default=min(20, os.cpu_count()))
-    if TEST:
-        args = parser.parse_args(['-q', file_sqlite, '-g', file_genome, '-p', file_protein, '-f', file_gtf, '-o', outprefix, '-a', 'GENCODE_GTF', '-k', protein_keyword, '--keep_all', str(keep_all)])
+    add_argument_set(
+        parser,
+        'sqlite',
+        'reference_inputs',
+        'annotation',
+        'cleanup',
+        'runtime_output',
+        overrides={
+            'sqlite': {
+                'help': 'SQLite file with CDS and exon annotations',
+                'required': True,
+            },
+            'genome': {'required': True},
+            'protein': {'required': True},
+            'gtf': {'required': True},
+            'out': {'help': '''output prefix. used to store temp files. default "perGeno" '''},
+        },
+    )
+    return parser
 
-    else:
-        args = parser.parse_args()
-    
+
+def run_from_args(args):
     create_sqlite(
         file_sqlite=args.sqlite,
         file_genome=args.genome,
@@ -833,6 +843,15 @@ def main():
     )
     
     print('SQLite creation complete.')
+
+
+def main(argv=None):
+    parser = build_parser()
+    if argv is None and TEST:
+        argv = ['-S', file_sqlite, '-g', file_genome, '-p', file_protein, '-f', file_gtf, '-o', outprefix, '-a', 'GENCODE_GTF', '-k', protein_keyword]
+        if keep_all:
+            argv.append('--keep_all')
+    run_from_args(parser.parse_args(argv))
 
 if __name__ == '__main__':
     main()

@@ -12,11 +12,13 @@ import sqlite3
 from multiprocessing import Pool
 
 if __package__:
+    from .args import add_argument_set
     from . import buildSqlite
     from . import perChrom
     from . import perChromSqlite
     from .PrecisionProDB_core import PerGeno, get_k_new
 else:
+    from args import add_argument_set
     import buildSqlite
     import perChrom
     import perChromSqlite
@@ -429,45 +431,35 @@ description = '''PrecisionProDB_Sqlite, personal proteogenomic tools which outpu
 if datatype is gtf or not set, the gtf input is required
 '''
 
-def main():
-    import argparse
-    parser = argparse.ArgumentParser(description=description)
-    import argparse
-    parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('-g','--genome', help = 'the reference genome sequence in fasta format. It can be a gzip file', default='')
-    parser.add_argument('-f', '--gtf', help='gtf file with CDS and exon annotations. It can be a gzip file', default='')
-    parser.add_argument('-m', '--mutations', help='''
-                        a file stores the variants. 
-                        If the file ends with ".vcf" or ".vcf.gz", treat as vcf input. Otherwise, treat as TSV input. 
-                        a string like "chr1-788418-CAG-C" or "chr1-942451-T-C,1-6253878-C-T,1-2194700-C-G" can used as variant input, too. In this mode, --sample will not be used.
-                        If multiple vcf files are provided, use "," to join the file names. For example, "--mutations file1.vcf,file2.vcf". A pattern match is also supported for input vcf, but quote is required to get it work. For example '--mutations "file*.vcf" ' 
-                        A TSV manifest with first header column "filepath" is supported for one-VCF-per-sample population mode. Optional manifest columns: sample, name_use.
-                        
-                        ''', default = '', required=False)
-    parser.add_argument('-p','--protein', help = 'protein sequences in fasta format. It can be a gzip file. Only proteins in this file will be checked', default='')
-    parser.add_argument('-t', '--threads', help='number of threads/CPUs to run the program. default, use all CPUs available', type=int, default=min(20, os.cpu_count()))
-    parser.add_argument('-o', '--out', help='''output prefix, folder path could be included. Three or five files will be saved depending on the variant file format. Outputs include the annotation for mutated transcripts, the mutated or all protein sequences, two variant files from vcf. {out}.pergeno.aa_mutations.csv, {out}.pergeno.protein_all.fa, {out}.protein_changed.fa, {out}.vcf2mutation_1/2.tsv. default "perGeno" ''', default="perGeno")
-    parser.add_argument('-a', '--datatype', help='''input datatype, could be GENCODE_GTF, GENCODE_GFF3, RefSeq, Ensembl_GTF or gtf. default "gtf". Ensembl_GFF3 is not supported. ''', default='gtf', type=str, choices=['GENCODE_GTF', 'GENCODE_GFF3','RefSeq','Ensembl_GTF','gtf'])
-    parser.add_argument('-k','--protein_keyword', help='''field name in attribute column of gtf file to determine ids for proteins. default "auto", determine the protein_keyword based on datatype. "transcript_id" for GENCODE_GTF, "protein_id" for "RefSeq" and "Parent" for gtf and GENCODE_GFF3 ''', default='auto')
-    parser.add_argument('-F', '--no_filter', help='default only keep variant with value "PASS" FILTER column of vcf file. if set, do not filter', action='store_true')
-    parser.add_argument('-s', '--sample', help='''
-                        sample name in the vcf to extract the variant information. default: None, extract the first sample. 
-                        For multiple samples, use "," to join the sample names. For example, "--sample sample1,sample2,sample3". 
-                        To use all samples, use "--sample ALL_SAMPLES". 
-                        To use all variants regardless where the variants from, use "--sample ALL_VARIANTS".
-                        ''', default=None)
-    parser.add_argument('-A','--all_chromosomes', help='default keep variant in chromosomes and ignore those in short fragments of the genome. if set, use all chromosomes including fragments when parsing the vcf file', action='store_true')
-    parser.add_argument('--keep_all', help='If set, do not delete files generated during the run', action='store_true')
-    parser.add_argument('-S','--sqlite', help='''A path of sqlite file for re-use of annotation info. default '', do not use sqlite. The program will create a sqlite file if the file does not exist. If the file already exists, the program will use data stored in the file. It will cause error if the content in the sqlite file is not as expected. ''', default='', type=str)
-    parser.add_argument('--info_field', help='fields to use in the INFO column of the vcf file to filter variants. Default None', default = None)
-    parser.add_argument('--info_field_thres', help='threhold for the info field. Default None, do not filter any variants. If set "--info_filed AF --info_field_thres 0.01", only keep variants with AF >= 0.01', default = None)
 
-    
-    if TEST:
-        f = parser.parse_args(f"-g {file_genome} -f {file_gtf} -m {file_mutations} -p {file_protein} -t {threads} -o {outprefix} -a {datatype} -k {protein_keyword} -F --keep_all -S {file_sqlite}".split())
-    else:
-        f = parser.parse_args()
-    
+def build_parser():
+    import argparse
+    parser = argparse.ArgumentParser(description=description)
+    add_argument_set(
+        parser,
+        'reference_inputs',
+        'variant_input_detailed',
+        'runtime_output',
+        'annotation',
+        'vcf_selection_mixed',
+        'cleanup',
+        'sqlite',
+        'vcf_info_filters',
+        overrides={
+            'sqlite': {
+                'help': '''A path of sqlite file for re-use of annotation info. default '', do not use sqlite. The program will create a sqlite file if the file does not exist. If the file already exists, the program will use data stored in the file. It will cause error if the content in the sqlite file is not as expected. ''',
+            },
+        },
+    )
+    return parser
+
+
+def main(argv=None):
+    parser = build_parser()
+    if argv is None and TEST:
+        argv = f"-g {file_genome} -f {file_gtf} -m {file_mutations} -p {file_protein} -t {threads} -o {outprefix} -a {datatype} -k {protein_keyword} -F --keep_all -S {file_sqlite}".split()
+    f = parser.parse_args(argv)
+
     file_genome = f.genome
     file_gtf = f.gtf
     file_mutations = f.mutations

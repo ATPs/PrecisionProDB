@@ -7,6 +7,11 @@ import numpy as np
 import shutil
 import subprocess
 
+if __package__:
+    from .args import add_argument_set
+else:
+    from args import add_argument_set
+
 try:
     import tqdm
 except:
@@ -910,24 +915,18 @@ If --sample is not set or only one sample were used, the same as PrecisionProDB 
 Otherwise, PrecisionProDB version 2.0 mode. Output a single file with extra columns for each sample. If only one sample is used and version 2.0 mode is desired, use "--sample sample,"
 '''
 
-def main():
+def build_parser():
     import argparse
     parser = argparse.ArgumentParser(description=description)
-    parser.add_argument('-i', '--file_vcf', help='''input vcf file. It can be a gzip file. If multiple vcf files are provided, use "," to join the file names. For example, "--file_vcf file1.vcf,file2.vcf". A pattern match is also supported, but quote is required to get it work. For example '--file_vcf "file*.vcf"'. A TSV manifest with first header column "filepath" is also supported for one-VCF-per-sample population mode. Optional manifest columns: sample, name_use. ''', required=True)
-    parser.add_argument('-o', '--outprefix', help='output prefix to store the two output dataframes, default: None, do not write the result to files. file will be outprefix_1/2.tsv', default=None)
-    parser.add_argument('-s', '--sample', help='sample name in the vcf to extract the variant information. default: None, extract the first sample. For multiple samples, use "," to join the sample names. For example, "--sample sample1,sample2,sample3". To use all samples, use "--sample ALL_SAMPLES". To use all variants regardless where the variants from, use "--sample ALL_VARIANTS".', default=None)
-    parser.add_argument('-F', '--no_filter', help='default only keep variant with value "PASS" FILTER column of vcf file. if set, do not filter', action='store_true')
-    parser.add_argument('-A','--all_chromosomes', help='default keep variant in chromosomes and ignore those in short fragments of the genome. if set, use all chromosomes including fragments', action='store_true')
-    parser.add_argument('--info_field', help='fields to use in the INFO column of the vcf file to filter variants. Default None', default = None)
-    parser.add_argument('--info_field_thres', help='threhold for the info field. Default None, do not filter any variants. If set "--info_filed AF --info_field_thres 0.01", only keep variants with AF >= 0.01', default = None)
-    parser.add_argument('-t', '--threads', help='number of threads/CPUs to run the program. default, 1. For manifest input, VCF files are parsed in parallel across manifest rows.', type=int, default=1)
+    add_argument_set(parser, 'vcf_conversion')
+    return parser
 
-    f = parser.parse_args()
+
+def run_from_args(f):
     chromosome_only = not f.all_chromosomes
     filter_PASS = not f.no_filter
     sample = f.sample
-    #print(f)
-    
+
     if is_manifest_file(f.file_vcf):
         print('convert manifest VCF list to mutation information in version 2.0 mode')
         convertVCF2MutationComplex(file_vcf = f.file_vcf, outprefix = f.outprefix, individual_input='ALL_SAMPLES', filter_PASS = filter_PASS, chromosome_only = chromosome_only, info_field = f.info_field, info_field_thres = f.info_field_thres, threads = f.threads)
@@ -940,6 +939,10 @@ def main():
     else:
         print('convert vcf to mutation information in version 1.0 mode')
         getMutationsFromVCF(file_vcf = f.file_vcf, outprefix = f.outprefix, individual=f.sample, filter_PASS = filter_PASS, chromosome_only = chromosome_only)
+
+
+def main(argv=None):
+    run_from_args(build_parser().parse_args(argv))
 
 
 if __name__ == '__main__':
