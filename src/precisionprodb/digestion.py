@@ -1,5 +1,7 @@
 import argparse
+from bisect import bisect_left
 import gzip
+import re
 import sys
 
 
@@ -31,7 +33,15 @@ Input modes:
 Cleavage rules:
   - Default behavior is the same as --enzyme Trypsin --missed-cleavages 2.
   - Use --enzyme for Comet-style presets.
+  - Use --enzyme2 to add a second enzyme; cleavage positions are merged.
+  - Use --cleavage-regex/--cleavage-regex2 for custom zero-width cleavage boundaries.
   - Use -c/-a/-p to override the preset manually.
+
+Cleavage specificity:
+  - full: both peptide termini must follow the cleavage rule (default).
+  - n-specific: the N terminus follows the rule; the C terminus may be truncated.
+  - c-specific: the C terminus follows the rule; the N terminus may be truncated.
+  - semi: union of n-specific and c-specific results, with duplicates removed.
 
 I/L handling in this standalone CLI:
   - Default: keep I and L distinct.
@@ -41,6 +51,10 @@ Initiator methionine handling:
   - --initiator-methionine controls whether an N-terminal M is retained,
     removed, or both forms are digested (default: both).
 
+Peptide attachments:
+  - --nterm-attach and --cterm-attach add fixed strings after digestion.
+  - Length filtering and TSV coordinates refer to the core digested peptide.
+
 Stop-codon handling:
   - Internal "*" is always treated as a hard breakpoint.
   - Output peptides never include "*".
@@ -49,6 +63,7 @@ Stop-codon handling:
 Output behavior:
   - TSV always includes protein_id, peptide, start, and end.
   - protein_id is the first whitespace-delimited token from the FASTA header.
+  - FASTA records and peptide occurrences are streamed by the CLI.
   - peptide and fasta outputs are de-duplicated by peptide sequence.
 """
 EPILOG = """Examples:
@@ -58,11 +73,24 @@ EPILOG = """Examples:
   FASTA digestion with missed cleavages:
     python src/precisionprodb/digestion.py proteins.fa --enzyme Trypsin --missed-cleavages 2 -l 6 -M 40
 
+  Two-enzyme digestion:
+    python src/precisionprodb/digestion.py proteins.fa --enzyme Trypsin --enzyme2 Lys_C
+
+  Custom regex boundaries:
+    python src/precisionprodb/digestion.py --sequence AKRPQK --cleavage-regex '(?<=[KR])(?!P)'
+    python src/precisionprodb/digestion.py --sequence AAENLYFQG --cleavage-regex '(?<=ENLYFQ)(?=[GS])'
+
+  Semi-specific digestion:
+    python src/precisionprodb/digestion.py proteins.fa --specificity semi
+
   Gzipped FASTA input:
     python src/precisionprodb/digestion.py proteins.fa.gz --output-format peptide
 
   Remove the initiator methionine before digestion:
     python src/precisionprodb/digestion.py --sequence MAKRPQK --initiator-methionine remove
+
+  Add fixed terminal sequences to every output peptide:
+    python src/precisionprodb/digestion.py --sequence PEPTIDE --enzyme No_cut -l 1 --nterm-attach SY --cterm-attach GG
 
   Output-format examples:
     python src/precisionprodb/digestion.py proteins.fa --output-format tsv
@@ -94,7 +122,7 @@ EPILOG = """Examples:
     python src/precisionprodb/digestion.py proteins.fa --enzyme Cut_everywhere
     python src/precisionprodb/digestion.py proteins.fa --enzyme Trypsin -a ""
 
-Comet-style enzyme presets for --enzyme NAME:
+Comet-style enzyme presets for --enzyme NAME and --enzyme2 NAME:
   0.  Cut_everywhere         0      -           -
   1.  Trypsin                1      KR          P
   2.  Trypsin/P              1      KR          -
@@ -112,13 +140,21 @@ Notes:
   - In the preset table, 1 means c-terminal cleavage and 0 means n-terminal cleavage.
   - Cut_everywhere emits all contiguous peptides within the requested length range.
   - Cut_everywhere behaves like unlimited missed cleavages and ignores --missed-cleavages.
-  - No_cut emits the full sequence as one peptide.
-  - Manual -c/-a/-p values override --enzyme when both are present.
+  - No_cut with full specificity emits the full sequence as one peptide;
+    partial specificity emits prefixes and/or suffixes.
+  - Manual -c/-a/-p values override --enzyme only; --enzyme2 uses its preset.
+  - With --enzyme2, cleavage positions from both enzymes are merged and duplicates count once.
+  - Cleavage regexes must match zero-width amino-acid boundaries; they do not remove residues.
   - Internal "*" always splits the protein before digestion and is never kept in output peptides.
   - TSV coordinates are 1-based inclusive and internal "*" counts in the parent protein position.
   - peptide and fasta outputs keep only the first occurrence of each peptide sequence.
+  - TSV output does not retain all generated peptides; peptide and fasta output retain
+    a set of unique peptide sequences because those formats require de-duplication.
   - --initiator-methionine both emits retained and N-terminal-M-removed forms;
     shared peptide occurrences are emitted once.
+  - --specificity semi is the de-duplicated union of n-specific and c-specific results.
+  - Terminal attachments are added after digestion and do not affect cleavage,
+    missed-cleavage counting, length filtering, or TSV coordinates.
   - This PrecisionProDB version is pure Python and does not use fast_digest/Cython.
 """
 
@@ -208,8 +244,21 @@ def resolve_enzyme_name(name):
     return resolved
 
 
-def resolve_cleavage_rule(enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_cleavage_sites=None, cleavage_position=None):
+def _compile_cleavage_regex(cleavage_regex):
+    """Compile a custom cleavage-boundary regex."""
+    try:
+        return re.compile(cleavage_regex)
+    except (TypeError, re.error) as exc:
+        raise ValueError('invalid cleavage regex: {}'.format(exc))
+
+
+def resolve_cleavage_rule(enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_cleavage_sites=None, cleavage_position=None, cleavage_regex=None):
     """Resolve preset and manual enzyme settings into one cleavage rule."""
+    if cleavage_regex is not None and any(
+        value is not None
+        for value in [cleavage_sites, anti_cleavage_sites, cleavage_position]
+    ):
+        raise ValueError('cleavage_regex cannot be combined with cleavage_sites, anti_cleavage_sites, or cleavage_position')
     enzyme_name = resolve_enzyme_name(enzyme) or DEFAULT_ENZYME
     preset = ENZYME_PRESETS[enzyme_name]
     sites = preset['sites'] if cleavage_sites is None else cleavage_sites
@@ -217,12 +266,15 @@ def resolve_cleavage_rule(enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_cleav
     position = preset['pos'] if cleavage_position is None else cleavage_position
     if position not in ['c', 'n']:
         raise ValueError("cleavage_position must be 'c' or 'n'")
-    return {
+    rule = {
         'enzyme': enzyme_name,
         'sites': sites,
         'no': anti_sites,
         'pos': position,
     }
+    if cleavage_regex is not None:
+        rule['regex'] = _compile_cleavage_regex(cleavage_regex)
+    return rule
 
 
 def _unique_positions(positions):
@@ -261,10 +313,80 @@ def _cleavage_boundaries(protein, sites='KR', pos='c', no='P'):
     return _unique_positions(boundaries)
 
 
-def _segment_digest_occurrences(protein, sites='KR', pos='c', no='P', min_len=0, max_len=None):
-    """Return peptide occurrences as ``(peptide, start_0based, end_0based_exclusive)``."""
-    occurrences = []
-    boundaries = _cleavage_boundaries(protein, sites=sites, pos=pos, no=no)
+def _regex_cleavage_boundaries(protein, cleavage_regex):
+    """Return boundaries from zero-width regex matches plus protein termini."""
+    boundaries = [0]
+    for match in cleavage_regex.finditer(protein):
+        if match.start() != match.end():
+            raise ValueError(
+                'cleavage regex must use zero-width matches; matched residues at {}-{}'.format(
+                    match.start(),
+                    match.end(),
+                )
+            )
+        if match.start() != boundaries[-1]:
+            boundaries.append(match.start())
+    if boundaries[-1] != len(protein):
+        boundaries.append(len(protein))
+    return boundaries
+
+
+def _rule_cleavage_boundaries(protein, rule):
+    """Return boundaries for a preset/manual rule or a custom regex rule."""
+    cleavage_regex = rule.get('regex')
+    if cleavage_regex is not None:
+        return _regex_cleavage_boundaries(protein, cleavage_regex)
+    return _cleavage_boundaries(
+        protein,
+        sites=rule['sites'],
+        pos=rule['pos'],
+        no=rule['no'],
+    )
+
+
+def _is_cut_everywhere_resolved_rule(rule):
+    """Return True only when a rule uses the Cut_everywhere preset behavior."""
+    return (
+        rule.get('regex') is None
+        and _is_cut_everywhere_rule(rule['sites'], rule['pos'], rule['no'])
+    )
+
+
+def _merged_cleavage_boundaries(protein, rules):
+    """Return the sorted union of cleavage boundaries from one or two rules."""
+    boundaries = _rule_cleavage_boundaries(protein, rules[0])
+    for rule in rules[1:]:
+        additional_boundaries = _rule_cleavage_boundaries(protein, rule)
+        merged = []
+        first_index = 0
+        second_index = 0
+        while first_index < len(boundaries) or second_index < len(additional_boundaries):
+            if second_index >= len(additional_boundaries):
+                position = boundaries[first_index]
+                first_index += 1
+            elif first_index >= len(boundaries):
+                position = additional_boundaries[second_index]
+                second_index += 1
+            elif boundaries[first_index] < additional_boundaries[second_index]:
+                position = boundaries[first_index]
+                first_index += 1
+            elif additional_boundaries[second_index] < boundaries[first_index]:
+                position = additional_boundaries[second_index]
+                second_index += 1
+            else:
+                position = boundaries[first_index]
+                first_index += 1
+                second_index += 1
+            if not merged or merged[-1] != position:
+                merged.append(position)
+        boundaries = merged
+    return boundaries
+
+
+def _segment_digest_occurrences(protein, sites='KR', pos='c', no='P', min_len=0, max_len=None, boundaries=None):
+    """Yield peptide occurrences as ``(peptide, start_0based, end_0based_exclusive)``."""
+    if boundaries is None:
+        boundaries = _cleavage_boundaries(protein, sites=sites, pos=pos, no=no)
     for start, end in zip(boundaries, boundaries[1:]):
         peptide = protein[start:end]
         peptide_length = len(peptide)
@@ -272,13 +394,11 @@ def _segment_digest_occurrences(protein, sites='KR', pos='c', no='P', min_len=0,
             continue
         if max_len is not None and peptide_length > max_len:
             continue
-        occurrences.append((peptide, start, end))
-    return occurrences
+        yield peptide, start, end
 
 
 def _segment_cut_everywhere_occurrences(protein, min_len=0, max_len=None):
-    """Return all contiguous peptide occurrences for the requested length range."""
-    occurrences = []
+    """Yield all contiguous peptide occurrences for the requested length range."""
     protein_length = len(protein)
     min_len = max(1, min_len)
     if max_len is None:
@@ -290,29 +410,121 @@ def _segment_cut_everywhere_occurrences(protein, min_len=0, max_len=None):
         if min_end > max_end:
             continue
         for end in range(min_end, max_end + 1):
-            occurrences.append((protein[start:end], start, end))
-    return occurrences
+            yield protein[start:end], start, end
 
 
-def _segment_digest_with_missed_cleavages_occurrences(protein, sites='KR', pos='c', no='P', miss_cleavage=2, peplen_min=6, peplen_max=40):
-    """Return missed-cleavage occurrences as ``(peptide, start_0based, end_0based_exclusive)``."""
-    peptides_cut_all = _segment_digest_occurrences(protein, sites=sites, pos=pos, no=no, min_len=0)
-    occurrences = []
+def _segment_digest_with_missed_cleavages_occurrences(protein, sites='KR', pos='c', no='P', miss_cleavage=2, peplen_min=6, peplen_max=40, boundaries=None):
+    """Yield missed-cleavage occurrences as ``(peptide, start, end)``."""
+    if boundaries is None:
+        boundaries = _cleavage_boundaries(protein, sites=sites, pos=pos, no=no)
     max_missed = max(0, int(miss_cleavage))
     for missed_count in range(max_missed + 1):
-        for start_index in range(len(peptides_cut_all) - missed_count):
-            segment_occurrences = peptides_cut_all[start_index:start_index + missed_count + 1]
-            peptide = ''.join(item[0] for item in segment_occurrences)
+        for start_index in range(len(boundaries) - missed_count - 1):
+            start = boundaries[start_index]
+            end = boundaries[start_index + missed_count + 1]
+            peptide = protein[start:end]
             peptide_length = len(peptide)
             if peplen_min <= peptide_length <= peplen_max:
-                occurrences.append(
-                    (
-                        peptide,
-                        segment_occurrences[0][1],
-                        segment_occurrences[-1][2],
-                    )
-                )
-    return occurrences
+                yield peptide, start, end
+
+
+def _segment_n_specific_occurrences(protein, sites='KR', pos='c', no='P', miss_cleavage=2, peplen_min=6, peplen_max=40, boundaries=None):
+    """Yield occurrences with a specific N terminus and arbitrary C terminus."""
+    if boundaries is None:
+        boundaries = _cleavage_boundaries(protein, sites=sites, pos=pos, no=no)
+    max_missed = max(0, int(miss_cleavage))
+    min_length = max(1, peplen_min)
+    for start_index in range(len(boundaries) - 1):
+        start = boundaries[start_index]
+        last_index = min(start_index + max_missed + 1, len(boundaries) - 1)
+        min_end = start + min_length
+        max_end = min(boundaries[last_index], start + peplen_max)
+        for end in range(min_end, max_end + 1):
+            yield protein[start:end], start, end
+
+
+def _segment_c_specific_occurrences(protein, sites='KR', pos='c', no='P', miss_cleavage=2, peplen_min=6, peplen_max=40, boundaries=None):
+    """Yield occurrences with an arbitrary N terminus and specific C terminus."""
+    if boundaries is None:
+        boundaries = _cleavage_boundaries(protein, sites=sites, pos=pos, no=no)
+    max_missed = max(0, int(miss_cleavage))
+    min_length = max(1, peplen_min)
+    for end_index in range(1, len(boundaries)):
+        end = boundaries[end_index]
+        first_index = max(0, end_index - max_missed - 1)
+        min_start = max(boundaries[first_index], end - peplen_max)
+        max_start = end - min_length
+        for start in range(min_start, max_start + 1):
+            yield protein[start:end], start, end
+
+
+def _segment_digest_with_specificity_occurrences(protein, sites='KR', pos='c', no='P', miss_cleavage=2, peplen_min=6, peplen_max=40, specificity='full', boundaries=None):
+    """Yield peptide occurrences for the requested cleavage specificity."""
+    if specificity == 'full':
+        yield from _segment_digest_with_missed_cleavages_occurrences(
+            protein,
+            sites=sites,
+            pos=pos,
+            no=no,
+            miss_cleavage=miss_cleavage,
+            peplen_min=peplen_min,
+            peplen_max=peplen_max,
+            boundaries=boundaries,
+        )
+        return
+    if specificity == 'n-specific':
+        yield from _segment_n_specific_occurrences(
+            protein,
+            sites=sites,
+            pos=pos,
+            no=no,
+            miss_cleavage=miss_cleavage,
+            peplen_min=peplen_min,
+            peplen_max=peplen_max,
+            boundaries=boundaries,
+        )
+        return
+    if specificity == 'c-specific':
+        yield from _segment_c_specific_occurrences(
+            protein,
+            sites=sites,
+            pos=pos,
+            no=no,
+            miss_cleavage=miss_cleavage,
+            peplen_min=peplen_min,
+            peplen_max=peplen_max,
+            boundaries=boundaries,
+        )
+        return
+    if specificity == 'semi':
+        if boundaries is None:
+            boundaries = _cleavage_boundaries(protein, sites=sites, pos=pos, no=no)
+        for occurrence in _segment_n_specific_occurrences(
+            protein,
+            sites=sites,
+            pos=pos,
+            no=no,
+            miss_cleavage=miss_cleavage,
+            peplen_min=peplen_min,
+            peplen_max=peplen_max,
+            boundaries=boundaries,
+        ):
+            yield occurrence
+        for occurrence in _segment_c_specific_occurrences(
+            protein,
+            sites=sites,
+            pos=pos,
+            no=no,
+            miss_cleavage=miss_cleavage,
+            peplen_min=peplen_min,
+            peplen_max=peplen_max,
+            boundaries=boundaries,
+        ):
+            boundary_index = bisect_left(boundaries, occurrence[1])
+            if boundary_index >= len(boundaries) or boundaries[boundary_index] != occurrence[1]:
+                yield occurrence
+        return
+    raise ValueError("specificity must be 'full', 'n-specific', 'c-specific', or 'semi'")
 
 
 def digest(protein, sites='KR', pos='c', no='P', min_len=0, max_len=None):
@@ -372,30 +584,52 @@ def digest_with_missed_cleavages(protein, sites='KR', pos='c', no='P', miss_clea
     return peptides
 
 
-def digest_sequence_occurrences(sequence, enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_cleavage_sites=None, cleavage_position=None, miss_cleavage=2, min_len=6, max_len=40, isobaric=False, initiator_methionine='both'):
-    """Digest one protein sequence with missed cleavages and return peptide occurrences."""
+def iter_digest_sequence_occurrences(sequence, enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_cleavage_sites=None, cleavage_position=None, miss_cleavage=2, min_len=6, max_len=40, isobaric=False, initiator_methionine='both', specificity='full', enzyme2=None, nterm_attach='', cterm_attach='', cleavage_regex=None, cleavage_regex2=None):
+    """Yield peptide occurrences from one protein sequence."""
     rule = resolve_cleavage_rule(
         enzyme=enzyme,
         cleavage_sites=cleavage_sites,
         anti_cleavage_sites=anti_cleavage_sites,
         cleavage_position=cleavage_position,
+        cleavage_regex=cleavage_regex,
     )
+    rules = [rule]
+    if enzyme2 or cleavage_regex2 is not None:
+        rules.append(
+            resolve_cleavage_rule(
+                enzyme=enzyme2 or DEFAULT_ENZYME,
+                cleavage_regex=cleavage_regex2,
+            )
+        )
+    if specificity not in ['full', 'n-specific', 'c-specific', 'semi']:
+        raise ValueError("specificity must be 'full', 'n-specific', 'c-specific', or 'semi'")
+    nterm_attach = str(nterm_attach or '')
+    cterm_attach = str(cterm_attach or '')
     normalized_sequence = normalize_sequence(sequence, isobaric=isobaric)
-    peptide_occurrences = []
-    seen_occurrences = set()
+    cut_everywhere = any(_is_cut_everywhere_resolved_rule(item) for item in rules)
+    variant_mode = initiator_methionine
+    if cut_everywhere and variant_mode == 'both' and normalized_sequence.startswith('M'):
+        variant_mode = 'retain'
+    deduplicate_variants = (
+        variant_mode == 'both'
+        and normalized_sequence.startswith('M')
+    )
+    seen_positions = set() if deduplicate_variants else None
+    position_multiplier = len(normalized_sequence) + 1
     for sequence_offset, sequence_variant in iter_initiator_methionine_variants(
         normalized_sequence,
-        initiator_methionine=initiator_methionine,
+        initiator_methionine=variant_mode,
     ):
         for segment_offset, segment in iter_stop_segments(sequence_variant):
-            if _is_cut_everywhere_rule(rule['sites'], rule['pos'], rule['no']):
+            if cut_everywhere:
                 segment_occurrences = _segment_cut_everywhere_occurrences(
                     segment,
                     min_len=min_len,
                     max_len=max_len,
                 )
             else:
-                segment_occurrences = _segment_digest_with_missed_cleavages_occurrences(
+                boundaries = _merged_cleavage_boundaries(segment, rules)
+                segment_occurrences = _segment_digest_with_specificity_occurrences(
                     segment,
                     sites=rule['sites'],
                     pos=rule['pos'],
@@ -403,24 +637,27 @@ def digest_sequence_occurrences(sequence, enzyme=DEFAULT_ENZYME, cleavage_sites=
                     miss_cleavage=miss_cleavage,
                     peplen_min=min_len,
                     peplen_max=max_len,
+                    specificity=specificity,
+                    boundaries=boundaries,
                 )
             for peptide, start, end in segment_occurrences:
                 occurrence = (
-                    peptide,
+                    nterm_attach + peptide + cterm_attach,
                     sequence_offset + segment_offset + start + 1,
                     sequence_offset + segment_offset + end,
                 )
-                if occurrence not in seen_occurrences:
-                    seen_occurrences.add(occurrence)
-                    peptide_occurrences.append(occurrence)
-    return peptide_occurrences
+                if seen_positions is not None:
+                    position_key = occurrence[1] * position_multiplier + occurrence[2]
+                    if position_key in seen_positions:
+                        continue
+                    seen_positions.add(position_key)
+                yield occurrence
 
 
-def digest_sequence(sequence, enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_cleavage_sites=None, cleavage_position=None, miss_cleavage=2, min_len=6, max_len=40, isobaric=False, initiator_methionine='both'):
-    """Digest one protein sequence with missed cleavages."""
-    return [
-        peptide
-        for peptide, _start, _end in digest_sequence_occurrences(
+def digest_sequence_occurrences(sequence, enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_cleavage_sites=None, cleavage_position=None, miss_cleavage=2, min_len=6, max_len=40, isobaric=False, initiator_methionine='both', specificity='full', enzyme2=None, nterm_attach='', cterm_attach='', cleavage_regex=None, cleavage_regex2=None):
+    """Digest one protein sequence and return a list of peptide occurrences."""
+    return list(
+        iter_digest_sequence_occurrences(
             sequence,
             enzyme=enzyme,
             cleavage_sites=cleavage_sites,
@@ -431,11 +668,42 @@ def digest_sequence(sequence, enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_c
             max_len=max_len,
             isobaric=isobaric,
             initiator_methionine=initiator_methionine,
+            specificity=specificity,
+            enzyme2=enzyme2,
+            nterm_attach=nterm_attach,
+            cterm_attach=cterm_attach,
+            cleavage_regex=cleavage_regex,
+            cleavage_regex2=cleavage_regex2,
+        )
+    )
+
+
+def digest_sequence(sequence, enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_cleavage_sites=None, cleavage_position=None, miss_cleavage=2, min_len=6, max_len=40, isobaric=False, initiator_methionine='both', specificity='full', enzyme2=None, nterm_attach='', cterm_attach='', cleavage_regex=None, cleavage_regex2=None):
+    """Digest one protein sequence with missed cleavages."""
+    return [
+        peptide
+        for peptide, _start, _end in iter_digest_sequence_occurrences(
+            sequence,
+            enzyme=enzyme,
+            cleavage_sites=cleavage_sites,
+            anti_cleavage_sites=anti_cleavage_sites,
+            cleavage_position=cleavage_position,
+            miss_cleavage=miss_cleavage,
+            min_len=min_len,
+            max_len=max_len,
+            isobaric=isobaric,
+            initiator_methionine=initiator_methionine,
+            specificity=specificity,
+            enzyme2=enzyme2,
+            nterm_attach=nterm_attach,
+            cterm_attach=cterm_attach,
+            cleavage_regex=cleavage_regex,
+            cleavage_regex2=cleavage_regex2,
         )
     ]
 
 
-def iter_digest_records(file_path, enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_cleavage_sites=None, cleavage_position=None, miss_cleavage=2, min_len=6, max_len=40, isobaric=False, initiator_methionine='both'):
+def iter_digest_records(file_path, enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_cleavage_sites=None, cleavage_position=None, miss_cleavage=2, min_len=6, max_len=40, isobaric=False, initiator_methionine='both', specificity='full', enzyme2=None, nterm_attach='', cterm_attach='', cleavage_regex=None, cleavage_regex2=None):
     """Yield ``(header, peptide_occurrences)`` pairs for a FASTA file."""
     for header, sequence in read_fasta_records(file_path):
         yield header, digest_sequence_occurrences(
@@ -449,6 +717,35 @@ def iter_digest_records(file_path, enzyme=DEFAULT_ENZYME, cleavage_sites=None, a
             max_len=max_len,
             isobaric=isobaric,
             initiator_methionine=initiator_methionine,
+            specificity=specificity,
+            enzyme2=enzyme2,
+            nterm_attach=nterm_attach,
+            cterm_attach=cterm_attach,
+            cleavage_regex=cleavage_regex,
+            cleavage_regex2=cleavage_regex2,
+        )
+
+
+def iter_digest_records_streaming(file_path, enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_cleavage_sites=None, cleavage_position=None, miss_cleavage=2, min_len=6, max_len=40, isobaric=False, initiator_methionine='both', specificity='full', enzyme2=None, nterm_attach='', cterm_attach='', cleavage_regex=None, cleavage_regex2=None):
+    """Yield FASTA records with streaming peptide-occurrence iterators."""
+    for header, sequence in read_fasta_records(file_path):
+        yield header, iter_digest_sequence_occurrences(
+            sequence,
+            enzyme=enzyme,
+            cleavage_sites=cleavage_sites,
+            anti_cleavage_sites=anti_cleavage_sites,
+            cleavage_position=cleavage_position,
+            miss_cleavage=miss_cleavage,
+            min_len=min_len,
+            max_len=max_len,
+            isobaric=isobaric,
+            initiator_methionine=initiator_methionine,
+            specificity=specificity,
+            enzyme2=enzyme2,
+            nterm_attach=nterm_attach,
+            cterm_attach=cterm_attach,
+            cleavage_regex=cleavage_regex,
+            cleavage_regex2=cleavage_regex2,
         )
 
 
@@ -524,6 +821,24 @@ def build_parser():
              'Examples: Trypsin, Trypsin/P, Lys_N, No_cut, Cut_everywhere',
     )
     parser.add_argument(
+        '--enzyme2',
+        default='',
+        help='Optional second Comet-style enzyme preset.\n'
+             'Its cleavage positions are merged with --enzyme.',
+    )
+    parser.add_argument(
+        '--cleavage-regex',
+        default=None,
+        help='Custom zero-width regex for first-rule cleavage boundaries.\n'
+             'Overrides --enzyme and cannot be combined with -c/-a/-p.',
+    )
+    parser.add_argument(
+        '--cleavage-regex2',
+        default=None,
+        help='Custom zero-width regex for second-rule cleavage boundaries.\n'
+             'Overrides --enzyme2 and may be used without --enzyme2.',
+    )
+    parser.add_argument(
         '--cleavage_sites',
         '-c',
         dest='cleavage_sites',
@@ -588,6 +903,24 @@ def build_parser():
              'retain = digest the original sequence only.',
     )
     parser.add_argument(
+        '--specificity',
+        choices=['full', 'n-specific', 'c-specific', 'semi'],
+        default='full',
+        help='Cleavage specificity. Default = full.\n'
+             'full = both termini specific; n-specific = arbitrary C terminus;\n'
+             'c-specific = arbitrary N terminus; semi = union of both partial modes.',
+    )
+    parser.add_argument(
+        '--nterm-attach',
+        default='',
+        help='Fixed string to prepend to every digested peptide. Default = empty.',
+    )
+    parser.add_argument(
+        '--cterm-attach',
+        default='',
+        help='Fixed string to append to every digested peptide. Default = empty.',
+    )
+    parser.add_argument(
         '--output-format',
         choices=['tsv', 'peptide', 'fasta'],
         default='tsv',
@@ -610,22 +943,24 @@ def build_parser():
 
 
 def _resolve_cli_cleavage(args):
-    rule = resolve_cleavage_rule(
+    resolve_cleavage_rule(
         enzyme=args.enzyme,
         cleavage_sites=args.cleavage_sites,
         anti_cleavage_sites=args.anti_cleavage_sites,
         cleavage_position=args.cleavage_position,
+        cleavage_regex=args.cleavage_regex,
     )
-    args.enzyme = rule['enzyme']
-    args.cleavage_sites = rule['sites']
-    args.anti_cleavage_sites = rule['no']
-    args.cleavage_position = rule['pos']
+    if args.enzyme2 or args.cleavage_regex2 is not None:
+        resolve_cleavage_rule(
+            enzyme=args.enzyme2 or DEFAULT_ENZYME,
+            cleavage_regex=args.cleavage_regex2,
+        )
     return args
 
 
 def _iter_cli_results(args):
     if args.sequence:
-        yield 'sequence', digest_sequence_occurrences(
+        yield 'sequence', iter_digest_sequence_occurrences(
             args.sequence,
             enzyme=args.enzyme,
             cleavage_sites=args.cleavage_sites,
@@ -636,11 +971,17 @@ def _iter_cli_results(args):
             max_len=args.max_len,
             isobaric=args.isobaric,
             initiator_methionine=args.initiator_methionine,
+            specificity=args.specificity,
+            enzyme2=args.enzyme2,
+            nterm_attach=args.nterm_attach,
+            cterm_attach=args.cterm_attach,
+            cleavage_regex=args.cleavage_regex,
+            cleavage_regex2=args.cleavage_regex2,
         )
         return
 
     for file_fasta in args.fasta:
-        yield from iter_digest_records(
+        yield from iter_digest_records_streaming(
             file_fasta,
             enzyme=args.enzyme,
             cleavage_sites=args.cleavage_sites,
@@ -651,6 +992,12 @@ def _iter_cli_results(args):
             max_len=args.max_len,
             isobaric=args.isobaric,
             initiator_methionine=args.initiator_methionine,
+            specificity=args.specificity,
+            enzyme2=args.enzyme2,
+            nterm_attach=args.nterm_attach,
+            cterm_attach=args.cterm_attach,
+            cleavage_regex=args.cleavage_regex,
+            cleavage_regex2=args.cleavage_regex2,
         )
 
 
