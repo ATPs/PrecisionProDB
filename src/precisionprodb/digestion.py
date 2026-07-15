@@ -2,6 +2,7 @@ import argparse
 from bisect import bisect_left
 import gzip
 import re
+from string import Formatter
 import sys
 
 
@@ -22,6 +23,7 @@ ENZYME_PRESETS = {
     'No_cut': {'pos': 'c', 'sites': '@', 'no': '@'},
 }
 ENZYME_LOOKUP = {name.lower(): name for name in ENZYME_PRESETS}
+HEADER_TEMPLATE_FIELDS = {'protein_id', 'index', 'header'}
 DESCRIPTION = """Digest protein sequences from FASTA input or a direct sequence string.
 
 Input modes:
@@ -762,9 +764,12 @@ def format_fasta_header(header, index, template='{protein_id}_{index}'):
     header_text = header[1:] if header.startswith('>') else header
     protein_id = format_tsv_protein_id(header)
     try:
+        for _literal, field_name, _format_spec, _conversion in Formatter().parse(template):
+            if field_name is not None and field_name not in HEADER_TEMPLATE_FIELDS:
+                raise ValueError('unsupported header template field: {}'.format(field_name))
         return template.format(protein_id=protein_id, index=index, header=header_text)
-    except KeyError as exc:
-        raise ValueError('unsupported header template field: {}'.format(exc.args[0]))
+    except (AttributeError, IndexError, KeyError, ValueError) as exc:
+        raise ValueError('invalid header template: {}'.format(exc))
 
 
 def write_digest_results(results, handle, output_format='tsv', header_template='{protein_id}_{index}'):
@@ -943,6 +948,14 @@ def build_parser():
 
 
 def _resolve_cli_cleavage(args):
+    if args.min_len < 1:
+        raise ValueError('min_peptide_length must be at least 1')
+    if args.max_len < 1:
+        raise ValueError('max_peptide_length must be at least 1')
+    if args.min_len > args.max_len:
+        raise ValueError('min_peptide_length cannot exceed max_peptide_length')
+    if args.miss_cleavage < 0:
+        raise ValueError('missed-cleavages must be at least 0')
     resolve_cleavage_rule(
         enzyme=args.enzyme,
         cleavage_sites=args.cleavage_sites,
