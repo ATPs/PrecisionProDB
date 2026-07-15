@@ -37,6 +37,10 @@ I/L handling in this standalone CLI:
   - Default: keep I and L distinct.
   - --isobaric: normalize I -> L before digestion.
 
+Initiator methionine handling:
+  - --initiator-methionine controls whether an N-terminal M is retained,
+    removed, or both forms are digested (default: both).
+
 Stop-codon handling:
   - Internal "*" is always treated as a hard breakpoint.
   - Output peptides never include "*".
@@ -56,6 +60,9 @@ EPILOG = """Examples:
 
   Gzipped FASTA input:
     python src/precisionprodb/digestion.py proteins.fa.gz --output-format peptide
+
+  Remove the initiator methionine before digestion:
+    python src/precisionprodb/digestion.py --sequence MAKRPQK --initiator-methionine remove
 
   Output-format examples:
     python src/precisionprodb/digestion.py proteins.fa --output-format tsv
@@ -110,6 +117,8 @@ Notes:
   - Internal "*" always splits the protein before digestion and is never kept in output peptides.
   - TSV coordinates are 1-based inclusive and internal "*" counts in the parent protein position.
   - peptide and fasta outputs keep only the first occurrence of each peptide sequence.
+  - --initiator-methionine both emits retained and N-terminal-M-removed forms;
+    shared peptide occurrences are emitted once.
   - This PrecisionProDB version is pure Python and does not use fast_digest/Cython.
 """
 
@@ -163,6 +172,20 @@ def iter_stop_segments(sequence):
         segment_start = index + 1
     if segment_start < len(sequence):
         yield segment_start, sequence[segment_start:]
+
+
+def iter_initiator_methionine_variants(sequence, initiator_methionine='both'):
+    """Yield ``(start_offset, sequence)`` variants for initiator methionine handling."""
+    if initiator_methionine not in ['both', 'remove', 'retain']:
+        raise ValueError("initiator_methionine must be 'both', 'remove', or 'retain'")
+    if not sequence.startswith('M') or initiator_methionine == 'retain':
+        yield 0, sequence
+        return
+    if initiator_methionine == 'remove':
+        yield 1, sequence[1:]
+        return
+    yield 0, sequence
+    yield 1, sequence[1:]
 
 
 def _is_cut_everywhere_rule(sites, pos, no):
@@ -349,7 +372,7 @@ def digest_with_missed_cleavages(protein, sites='KR', pos='c', no='P', miss_clea
     return peptides
 
 
-def digest_sequence_occurrences(sequence, method='digest', enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_cleavage_sites=None, cleavage_position=None, miss_cleavage=2, min_len=6, max_len=40, isobaric=False):
+def digest_sequence_occurrences(sequence, method='digest', enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_cleavage_sites=None, cleavage_position=None, miss_cleavage=2, min_len=6, max_len=40, isobaric=False, initiator_methionine='both'):
     """Digest one protein sequence and return ``(peptide, start_1based, end_1based)``."""
     rule = resolve_cleavage_rule(
         enzyme=enzyme,
@@ -361,38 +384,50 @@ def digest_sequence_occurrences(sequence, method='digest', enzyme=DEFAULT_ENZYME
         raise ValueError("method must be 'digest' or 'trypsin'")
     normalized_sequence = normalize_sequence(sequence, isobaric=isobaric)
     peptide_occurrences = []
-    for segment_offset, segment in iter_stop_segments(normalized_sequence):
-        if _is_cut_everywhere_rule(rule['sites'], rule['pos'], rule['no']):
-            segment_occurrences = _segment_cut_everywhere_occurrences(
-                segment,
-                min_len=min_len,
-                max_len=max_len,
-            )
-        elif method == 'trypsin':
-            segment_occurrences = _segment_digest_with_missed_cleavages_occurrences(
-                segment,
-                sites=rule['sites'],
-                pos=rule['pos'],
-                no=rule['no'],
-                miss_cleavage=miss_cleavage,
-                peplen_min=min_len,
-                peplen_max=max_len,
-            )
-        elif method == 'digest':
-            segment_occurrences = _segment_digest_occurrences(
-                segment,
-                sites=rule['sites'],
-                pos=rule['pos'],
-                no=rule['no'],
-                min_len=min_len,
-                max_len=max_len,
-            )
-        for peptide, start, end in segment_occurrences:
-            peptide_occurrences.append((peptide, segment_offset + start + 1, segment_offset + end))
+    seen_occurrences = set()
+    for sequence_offset, sequence_variant in iter_initiator_methionine_variants(
+        normalized_sequence,
+        initiator_methionine=initiator_methionine,
+    ):
+        for segment_offset, segment in iter_stop_segments(sequence_variant):
+            if _is_cut_everywhere_rule(rule['sites'], rule['pos'], rule['no']):
+                segment_occurrences = _segment_cut_everywhere_occurrences(
+                    segment,
+                    min_len=min_len,
+                    max_len=max_len,
+                )
+            elif method == 'trypsin':
+                segment_occurrences = _segment_digest_with_missed_cleavages_occurrences(
+                    segment,
+                    sites=rule['sites'],
+                    pos=rule['pos'],
+                    no=rule['no'],
+                    miss_cleavage=miss_cleavage,
+                    peplen_min=min_len,
+                    peplen_max=max_len,
+                )
+            elif method == 'digest':
+                segment_occurrences = _segment_digest_occurrences(
+                    segment,
+                    sites=rule['sites'],
+                    pos=rule['pos'],
+                    no=rule['no'],
+                    min_len=min_len,
+                    max_len=max_len,
+                )
+            for peptide, start, end in segment_occurrences:
+                occurrence = (
+                    peptide,
+                    sequence_offset + segment_offset + start + 1,
+                    sequence_offset + segment_offset + end,
+                )
+                if occurrence not in seen_occurrences:
+                    seen_occurrences.add(occurrence)
+                    peptide_occurrences.append(occurrence)
     return peptide_occurrences
 
 
-def digest_sequence(sequence, method='digest', enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_cleavage_sites=None, cleavage_position=None, miss_cleavage=2, min_len=6, max_len=40, isobaric=False):
+def digest_sequence(sequence, method='digest', enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_cleavage_sites=None, cleavage_position=None, miss_cleavage=2, min_len=6, max_len=40, isobaric=False, initiator_methionine='both'):
     """Digest one protein sequence with either direct cleavage or missed cleavages."""
     return [
         peptide
@@ -407,11 +442,12 @@ def digest_sequence(sequence, method='digest', enzyme=DEFAULT_ENZYME, cleavage_s
             min_len=min_len,
             max_len=max_len,
             isobaric=isobaric,
+            initiator_methionine=initiator_methionine,
         )
     ]
 
 
-def iter_digest_records(file_path, method='digest', enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_cleavage_sites=None, cleavage_position=None, miss_cleavage=2, min_len=6, max_len=40, isobaric=False):
+def iter_digest_records(file_path, method='digest', enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_cleavage_sites=None, cleavage_position=None, miss_cleavage=2, min_len=6, max_len=40, isobaric=False, initiator_methionine='both'):
     """Yield ``(header, peptide_occurrences)`` pairs for a FASTA file."""
     for header, sequence in read_fasta_records(file_path):
         yield header, digest_sequence_occurrences(
@@ -425,6 +461,7 @@ def iter_digest_records(file_path, method='digest', enzyme=DEFAULT_ENZYME, cleav
             min_len=min_len,
             max_len=max_len,
             isobaric=isobaric,
+            initiator_methionine=initiator_methionine,
         )
 
 
@@ -556,6 +593,14 @@ def build_parser():
              'Default is to keep I and L distinct in this standalone CLI.',
     )
     parser.add_argument(
+        '--initiator-methionine',
+        choices=['both', 'remove', 'retain'],
+        default='both',
+        help='Handle an N-terminal M before digestion. Default = both.\n'
+             'both = digest retained and removed forms; remove = digest without M;\n'
+             'retain = digest the original sequence only.',
+    )
+    parser.add_argument(
         '--method',
         choices=['digest', 'trypsin'],
         default='digest',
@@ -612,6 +657,7 @@ def _iter_cli_results(args):
             min_len=args.min_len,
             max_len=args.max_len,
             isobaric=args.isobaric,
+            initiator_methionine=args.initiator_methionine,
         )
         return
 
@@ -627,6 +673,7 @@ def _iter_cli_results(args):
             min_len=args.min_len,
             max_len=args.max_len,
             isobaric=args.isobaric,
+            initiator_methionine=args.initiator_methionine,
         )
 
 
