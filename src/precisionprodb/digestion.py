@@ -29,7 +29,7 @@ Input modes:
        python src/precisionprodb/digestion.py --sequence AKRPQK
 
 Cleavage rules:
-  - Default behavior is the same as --enzyme Trypsin.
+  - Default behavior is the same as --enzyme Trypsin --missed-cleavages 2.
   - Use --enzyme for Comet-style presets.
   - Use -c/-a/-p to override the preset manually.
 
@@ -56,7 +56,7 @@ EPILOG = """Examples:
     python src/precisionprodb/digestion.py --sequence AKRPQK -l 2
 
   FASTA digestion with missed cleavages:
-    python src/precisionprodb/digestion.py proteins.fa --method trypsin -L 2 -l 6 -M 40
+    python src/precisionprodb/digestion.py proteins.fa --enzyme Trypsin --missed-cleavages 2 -l 6 -M 40
 
   Gzipped FASTA input:
     python src/precisionprodb/digestion.py proteins.fa.gz --output-format peptide
@@ -111,7 +111,7 @@ Comet-style enzyme presets for --enzyme NAME:
 Notes:
   - In the preset table, 1 means c-terminal cleavage and 0 means n-terminal cleavage.
   - Cut_everywhere emits all contiguous peptides within the requested length range.
-  - Cut_everywhere behaves like unlimited missed cleavages and ignores the --miss_cleavage limit.
+  - Cut_everywhere behaves like unlimited missed cleavages and ignores --missed-cleavages.
   - No_cut emits the full sequence as one peptide.
   - Manual -c/-a/-p values override --enzyme when both are present.
   - Internal "*" always splits the protein before digestion and is never kept in output peptides.
@@ -372,16 +372,14 @@ def digest_with_missed_cleavages(protein, sites='KR', pos='c', no='P', miss_clea
     return peptides
 
 
-def digest_sequence_occurrences(sequence, method='digest', enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_cleavage_sites=None, cleavage_position=None, miss_cleavage=2, min_len=6, max_len=40, isobaric=False, initiator_methionine='both'):
-    """Digest one protein sequence and return ``(peptide, start_1based, end_1based)``."""
+def digest_sequence_occurrences(sequence, enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_cleavage_sites=None, cleavage_position=None, miss_cleavage=2, min_len=6, max_len=40, isobaric=False, initiator_methionine='both'):
+    """Digest one protein sequence with missed cleavages and return peptide occurrences."""
     rule = resolve_cleavage_rule(
         enzyme=enzyme,
         cleavage_sites=cleavage_sites,
         anti_cleavage_sites=anti_cleavage_sites,
         cleavage_position=cleavage_position,
     )
-    if method not in ['digest', 'trypsin']:
-        raise ValueError("method must be 'digest' or 'trypsin'")
     normalized_sequence = normalize_sequence(sequence, isobaric=isobaric)
     peptide_occurrences = []
     seen_occurrences = set()
@@ -396,7 +394,7 @@ def digest_sequence_occurrences(sequence, method='digest', enzyme=DEFAULT_ENZYME
                     min_len=min_len,
                     max_len=max_len,
                 )
-            elif method == 'trypsin':
+            else:
                 segment_occurrences = _segment_digest_with_missed_cleavages_occurrences(
                     segment,
                     sites=rule['sites'],
@@ -405,15 +403,6 @@ def digest_sequence_occurrences(sequence, method='digest', enzyme=DEFAULT_ENZYME
                     miss_cleavage=miss_cleavage,
                     peplen_min=min_len,
                     peplen_max=max_len,
-                )
-            elif method == 'digest':
-                segment_occurrences = _segment_digest_occurrences(
-                    segment,
-                    sites=rule['sites'],
-                    pos=rule['pos'],
-                    no=rule['no'],
-                    min_len=min_len,
-                    max_len=max_len,
                 )
             for peptide, start, end in segment_occurrences:
                 occurrence = (
@@ -427,13 +416,12 @@ def digest_sequence_occurrences(sequence, method='digest', enzyme=DEFAULT_ENZYME
     return peptide_occurrences
 
 
-def digest_sequence(sequence, method='digest', enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_cleavage_sites=None, cleavage_position=None, miss_cleavage=2, min_len=6, max_len=40, isobaric=False, initiator_methionine='both'):
-    """Digest one protein sequence with either direct cleavage or missed cleavages."""
+def digest_sequence(sequence, enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_cleavage_sites=None, cleavage_position=None, miss_cleavage=2, min_len=6, max_len=40, isobaric=False, initiator_methionine='both'):
+    """Digest one protein sequence with missed cleavages."""
     return [
         peptide
         for peptide, _start, _end in digest_sequence_occurrences(
             sequence,
-            method=method,
             enzyme=enzyme,
             cleavage_sites=cleavage_sites,
             anti_cleavage_sites=anti_cleavage_sites,
@@ -447,12 +435,11 @@ def digest_sequence(sequence, method='digest', enzyme=DEFAULT_ENZYME, cleavage_s
     ]
 
 
-def iter_digest_records(file_path, method='digest', enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_cleavage_sites=None, cleavage_position=None, miss_cleavage=2, min_len=6, max_len=40, isobaric=False, initiator_methionine='both'):
+def iter_digest_records(file_path, enzyme=DEFAULT_ENZYME, cleavage_sites=None, anti_cleavage_sites=None, cleavage_position=None, miss_cleavage=2, min_len=6, max_len=40, isobaric=False, initiator_methionine='both'):
     """Yield ``(header, peptide_occurrences)`` pairs for a FASTA file."""
     for header, sequence in read_fasta_records(file_path):
         yield header, digest_sequence_occurrences(
             sequence,
-            method=method,
             enzyme=enzyme,
             cleavage_sites=cleavage_sites,
             anti_cleavage_sites=anti_cleavage_sites,
@@ -578,12 +565,12 @@ def build_parser():
         help='Set maximum peptide length. Applied to all output modes. Default = 40',
     )
     parser.add_argument(
-        '--miss_cleavage',
+        '--missed-cleavages',
         '-L',
         dest='miss_cleavage',
         default=2,
         type=int,
-        help='Missed cleavage count for trypsin mode. Default = 2',
+        help='Maximum missed cleavages. Default = 2',
     )
     parser.add_argument(
         '--isobaric',
@@ -599,14 +586,6 @@ def build_parser():
         help='Handle an N-terminal M before digestion. Default = both.\n'
              'both = digest retained and removed forms; remove = digest without M;\n'
              'retain = digest the original sequence only.',
-    )
-    parser.add_argument(
-        '--method',
-        choices=['digest', 'trypsin'],
-        default='digest',
-        help='Digestion mode.\n'
-             'digest  = non-overlapping enzyme segments\n'
-             'trypsin = include missed-cleavage peptide combinations',
     )
     parser.add_argument(
         '--output-format',
@@ -648,7 +627,6 @@ def _iter_cli_results(args):
     if args.sequence:
         yield 'sequence', digest_sequence_occurrences(
             args.sequence,
-            method=args.method,
             enzyme=args.enzyme,
             cleavage_sites=args.cleavage_sites,
             anti_cleavage_sites=args.anti_cleavage_sites,
@@ -664,7 +642,6 @@ def _iter_cli_results(args):
     for file_fasta in args.fasta:
         yield from iter_digest_records(
             file_fasta,
-            method=args.method,
             enzyme=args.enzyme,
             cleavage_sites=args.cleavage_sites,
             anti_cleavage_sites=args.anti_cleavage_sites,
