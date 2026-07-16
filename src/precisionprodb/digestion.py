@@ -161,7 +161,8 @@ Notes:
 """
 
 def open_text_file(filename):
-    """Open a plain-text or gzipped text file."""
+    """Open a plain-text or gzipped text file from a string or path-like input."""
+    filename = str(filename)
     if filename.endswith('.gz'):
         return gzip.open(filename, 'rt')
     return open(filename)

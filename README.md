@@ -208,6 +208,30 @@ python Path_of_PrecisionProDB/src/precisionprodb/PrecisionProDB.py -m Manifest_f
 
 This manifest mode is a population mode and uses the SQLite workflow. Do not disable SQLite with `--sqlite NONE` for this input type.
 
+## Novel peptide output
+
+Peptide mode reports altered-protein digestion products that are absent from the
+canonical proteome under the same digestion profile. Build the reusable index
+once from the annotation SQLite, then enable peptide output during a normal
+SQLite-mode run:
+
+```bash
+buildPeptideSqlite -S GENCODE.sqlite -o GENCODE.trypsin_mc2_len7-35.peptides.sqlite \
+  --enzyme Trypsin --missed-cleavages 2 --min-peptide-length 7 --max-peptide-length 35
+
+PrecisionProDB -m variants.vcf.gz -S GENCODE.sqlite -o sample -a GENCODE_GTF \
+  --peptide --peptide-sqlite GENCODE.trypsin_mc2_len7-35.peptides.sqlite
+```
+
+This writes `sample.pergeno.peptide_novel.tsv` and a nonredundant
+`sample.pergeno.peptide_novel.fa`. The index profile must match the selected
+peptide options; use `--rebuild-peptide-sqlite` to atomically replace a stale
+index. Peptide mode requires SQLite annotation mode and is disabled unless
+`--peptide` is set; `--peptide-sqlite` only selects the index path.
+Canonical-index construction and changed-protein peptide digestion use up to
+eight worker processes, bounded by `-t/--threads`; SQLite membership checks and
+output writing remain deterministic in the parent process.
+
 ### VCF with local gene annotation 
 
 

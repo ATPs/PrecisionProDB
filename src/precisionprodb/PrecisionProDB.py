@@ -36,7 +36,16 @@ Additionally, a string like "chr1-788418-CAG-C" can used as variant input. It ha
 
 def build_parser():
     import argparse
-    parser = argparse.ArgumentParser(description=description)
+    parser = argparse.ArgumentParser(
+        description=description,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        epilog=(
+            'Peptide mode is disabled by default. Set --peptide to enable it; '
+            '--peptide-sqlite only selects or names the canonical index. When no '
+            '--peptide-sqlite is supplied, PrecisionProDB derives a profile-specific '
+            'path beside the annotation SQLite and builds it if missing.'
+        ),
+    )
     parser.add_argument('-v', '--version', action='version', version=f'PrecisionProDB {get_version()}')
     add_argument_set(
         parser,
@@ -48,12 +57,13 @@ def build_parser():
         'download_uniprot',
         'cleanup',
         'sqlite',
+        'peptide',
         'vcf_info_filters',
     )
     return parser
 
 
-def run_from_args(f):
+def run_from_args(f, parser=None):
     file_genome = f.genome
     file_gtf = f.gtf
     file_mutations = f.mutations
@@ -70,11 +80,33 @@ def run_from_args(f):
     uniprot_min_len = f.uniprot_min_len
     keep_all = f.keep_all
     file_sqlite = f.sqlite
+    peptide_config = None
     print(f)
     if file_sqlite == '':
         file_sqlite = outprefix + '.sqlite'
     elif file_sqlite == 'NONE':
         file_sqlite = ''
+
+    def argument_error(message):
+        if parser is not None:
+            parser.error(message)
+        print('error:', message, file=sys.stderr)
+        sys.exit(2)
+
+    if not f.peptide and (f.peptide_sqlite or f.rebuild_peptide_sqlite):
+        argument_error('--peptide-sqlite and --rebuild-peptide-sqlite require --peptide')
+
+    if f.peptide:
+        if file_sqlite == '':
+            argument_error('peptide mode requires SQLite annotation mode; do not use --sqlite NONE')
+        if __package__:
+            from .peptideSqlite import PeptideConfig
+        else:
+            from peptideSqlite import PeptideConfig
+        try:
+            peptide_config = PeptideConfig.from_namespace(f)
+        except ValueError as exc:
+            argument_error(str(exc))
 
     
     time0 = time.time()
@@ -180,7 +212,7 @@ def run_from_args(f):
         else:
             import PrecisionProDB_Sqlite
         print('using sqlite database to speed up')
-        PrecisionProDB_Sqlite.main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite, info_field = f.info_field, info_field_thres = f.info_field_thres)
+        PrecisionProDB_Sqlite.main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite, info_field = f.info_field, info_field_thres = f.info_field_thres, peptide_config=peptide_config, peptide_sqlite=f.peptide_sqlite, rebuild_peptide_sqlite=f.rebuild_peptide_sqlite)
 
     pattern = re.compile(r'(chr)?(\d+)-(\d+)-([A-Za-z]+)-([A-Za-z]+)')
     match = pattern.match(file_mutations)
@@ -219,7 +251,7 @@ def run_from_args(f):
 
 def main(argv=None):
     parser = build_parser()
-    run_from_args(parser.parse_args(argv))
+    run_from_args(parser.parse_args(argv), parser=parser)
 
 
 if __name__ == '__main__':

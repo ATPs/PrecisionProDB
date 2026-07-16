@@ -48,7 +48,8 @@ if TEST:
     file_sqlite = '/XCLabServer002_fastIO/examples/GENCODE/GENCODE.tsv.sqlite'
 
 
-def runSinglePerChromSqlite(file_sqlite, file_mutations, tempfolder, threads, chromosome, datatype, individual, force_memmap=False):
+def runSinglePerChromSqlite(file_sqlite, file_mutations, tempfolder, threads, chromosome, datatype, individual,
+                            force_memmap=False, peptide_config=None, known_peptide_index=None):
     '''
     run PerChrom_sqlite for a single chromosome
     '''
@@ -67,15 +68,27 @@ def runSinglePerChromSqlite(file_sqlite, file_mutations, tempfolder, threads, ch
     # print('finished running perchrom_sqlite for chromosome:', chromosome)
     # return chromosome
     try:
-        perchrom_sqlite.run_perChrom()
+        df_changed = perchrom_sqlite.run_perChrom()
         print('finished running perchrom_sqlite for chromosome:', chromosome)
-        return chromosome
     except Exception as e:
         print('cannot run perchrom_sqlite for chromosome', chromosome, 'Proteins will be unchanged. Error message:', e)
         return None
+    if peptide_config is not None:
+        if __package__:
+            from . import peptide
+        else:
+            import peptide
+        peptide.write_novel_peptide_part(
+            df_changed,
+            known_peptide_index,
+            os.path.join(tempfolder, chromosome + '.peptide_novel.tsv'),
+            peptide_config,
+            threads=threads,
+        )
+    return chromosome
 
 
-def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_keyword, datatype, keep_all, individual, chromosomes_genome, chromosomes_genome_description, file_gtf, force_memmap=False):
+def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_keyword, datatype, keep_all, individual, chromosomes_genome, chromosomes_genome_description, file_gtf, force_memmap=False, peptide_config=None, known_peptide_index=None):
     '''
     '''
     # split file_mutations by chromosome
@@ -132,7 +145,14 @@ def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_ke
             pool.join()
     
     # run runSinglePerChromSqlite
-    chromosomes_mutated = [runSinglePerChromSqlite(file_sqlite, f'{tempfolder}/{chromosome}.mutation.tsv', tempfolder, threads, chromosome, datatype, individual, force_memmap=use_force_memmap) for chromosome in chromosomes_mutation]
+    chromosomes_mutated = [
+        runSinglePerChromSqlite(
+            file_sqlite, f'{tempfolder}/{chromosome}.mutation.tsv', tempfolder, threads,
+            chromosome, datatype, individual, force_memmap=use_force_memmap,
+            peptide_config=peptide_config, known_peptide_index=known_peptide_index,
+        )
+        for chromosome in chromosomes_mutation
+    ]
     # successful chromosomes
     chromosomes_mutated = [e for e in chromosomes_mutated if e is not None]
     # collect mutation annotations
@@ -215,6 +235,16 @@ def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_ke
     conn.close()
     fout_proteins_changed.close()
     fout_proteins_all.close()
+
+    if peptide_config is not None:
+        if __package__:
+            from . import peptide
+        else:
+            import peptide
+        peptide.merge_novel_peptide_parts(
+            [os.path.join(tempfolder, chromosome + '.peptide_novel.tsv') for chromosome in chromosomes_mutated],
+            outprefix,
+        )
     
     # clear temp folder
     if keep_all:
@@ -225,7 +255,7 @@ def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_ke
 
     print('finished!')
 
-def runPerChomSqlite_vcf(file_mutations, file_sqlite, threads, outprefix, datatype, protein_keyword, keep_all, individual, chromosome_only, filter_PASS, chromosomes_genome, chromosomes_genome_description, file_gtf, info_field = None, info_field_thres=None):
+def runPerChomSqlite_vcf(file_mutations, file_sqlite, threads, outprefix, datatype, protein_keyword, keep_all, individual, chromosome_only, filter_PASS, chromosomes_genome, chromosomes_genome_description, file_gtf, info_field = None, info_field_thres=None, peptide_config=None, known_peptide_index=None):
     '''
     '''
     if __package__:
@@ -257,7 +287,9 @@ def runPerChomSqlite_vcf(file_mutations, file_sqlite, threads, outprefix, dataty
                      chromosomes_genome, 
                      chromosomes_genome_description, 
                      file_gtf,
-                     force_memmap=force_memmap
+                     force_memmap=force_memmap,
+                     peptide_config=peptide_config,
+                     known_peptide_index=known_peptide_index,
                      )
     
 
@@ -318,7 +350,7 @@ def check_sqlite_file(file_path):
         if 'conn' in locals():
             conn.close()
             
-def main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite, info_field=None, info_field_thres=None):
+def main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite, info_field=None, info_field_thres=None, peptide_config=None, peptide_sqlite=None, rebuild_peptide_sqlite=False):
     '''
     the main function of PrecisionProDB_Sqlite
     '''
@@ -334,6 +366,25 @@ def main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protei
         print('running in sqlite mode')
         print(f'sqlite file "{file_sqlite}" does not exist, create one first')
         buildSqlite.create_sqlite(file_sqlite, file_genome, file_gtf, file_protein, outprefix, datatype, protein_keyword, threads, keep_all)
+
+    known_peptide_index = None
+    if peptide_config is not None:
+        if __package__:
+            from .peptideSqlite import KnownPeptideIndex, ensure_peptide_sqlite
+        else:
+            from peptideSqlite import KnownPeptideIndex, ensure_peptide_sqlite
+        try:
+            peptide_sqlite = ensure_peptide_sqlite(
+                file_sqlite,
+                peptide_config,
+                peptide_sqlite=peptide_sqlite or None,
+                rebuild=rebuild_peptide_sqlite,
+                threads=threads,
+            )
+        except (FileExistsError, FileNotFoundError, ValueError) as exc:
+            print('error: peptide SQLite validation/build failed:', exc, file=sys.stderr)
+            sys.exit(2)
+        known_peptide_index = KnownPeptideIndex(peptide_sqlite)
 
     tempfolder = outprefix +'_temp'
     if not os.path.exists(tempfolder):
@@ -373,8 +424,20 @@ def main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protei
                             chromosome = chromosome)
             print('run perChrom for chromosome', chromosome)
             ls_results.append(perchrom_sqlite.run_perChrom(save_results=False))
-        df_transcript3 = pd.concat(ls_results, ignore_index=True)
-        perChrom.save_mutation_and_proteins(df_transcript3, outprefix)
+        # Keep the canonical protein_id index so peptide mappings can join back
+        # to the annotation SQLite in the single-variant fast path.
+        df_transcript3 = pd.concat(ls_results)
+        df_changed = perChrom.save_mutation_and_proteins(df_transcript3, outprefix)
+        if peptide_config is not None:
+            if __package__:
+                from . import peptide
+            else:
+                import peptide
+            part_file = os.path.join(tempfolder, 'single.peptide_novel.tsv')
+            peptide.write_novel_peptide_part(
+                df_changed, known_peptide_index, part_file, peptide_config, threads=threads
+            )
+            peptide.merge_novel_peptide_parts([part_file], outprefix)
         # clear temp folder
         if keep_all:
             print('keep all intermediate files')
@@ -406,7 +469,9 @@ def main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protei
             chromosomes_genome_description=chromosomes_genome_description,
             file_gtf=file_gtf,
             info_field=info_field,
-            info_field_thres=info_field_thres
+            info_field_thres=info_field_thres,
+            peptide_config=peptide_config,
+            known_peptide_index=known_peptide_index,
             )
     else:
         print('variant file is a tsv file')
@@ -422,8 +487,12 @@ def main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protei
             chromosomes_genome=chromosomes_genome,
             chromosomes_genome_description=chromosomes_genome_description,
             file_gtf=file_gtf,
-            force_memmap=(individual == 'ALL_SAMPLES')
+            force_memmap=(individual == 'ALL_SAMPLES'),
+            peptide_config=peptide_config,
+            known_peptide_index=known_peptide_index,
             )
+    if known_peptide_index is not None:
+        known_peptide_index.close()
 
 
 
@@ -434,7 +503,10 @@ if datatype is gtf or not set, the gtf input is required
 
 def build_parser():
     import argparse
-    parser = argparse.ArgumentParser(description=description)
+    parser = argparse.ArgumentParser(
+        description=description,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
     add_argument_set(
         parser,
         'reference_inputs',
@@ -444,6 +516,7 @@ def build_parser():
         'vcf_selection_mixed',
         'cleanup',
         'sqlite',
+        'peptide',
         'vcf_info_filters',
         overrides={
             'sqlite': {
@@ -473,10 +546,24 @@ def main(argv=None):
     chromosome_only = not f.all_chromosomes
     keep_all = f.keep_all
     file_sqlite = f.sqlite
+    peptide_config = None
+    if not f.peptide and (f.peptide_sqlite or f.rebuild_peptide_sqlite):
+        parser.error('--peptide-sqlite and --rebuild-peptide-sqlite require --peptide')
+    if f.peptide:
+        if file_sqlite in ['', 'NONE']:
+            parser.error('peptide mode requires a real annotation SQLite path')
+        if __package__:
+            from .peptideSqlite import PeptideConfig
+        else:
+            from peptideSqlite import PeptideConfig
+        try:
+            peptide_config = PeptideConfig.from_namespace(f)
+        except ValueError as exc:
+            parser.error(str(exc))
     print(description)
     print(f)
 
-    main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite, info_field=f.info_field, info_field_thres=f.info_field_thres)
+    main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite, info_field=f.info_field, info_field_thres=f.info_field_thres, peptide_config=peptide_config, peptide_sqlite=f.peptide_sqlite, rebuild_peptide_sqlite=f.rebuild_peptide_sqlite)
 
 if __name__ == '__main__':
     main()

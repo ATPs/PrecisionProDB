@@ -22,6 +22,7 @@ setup(
     entry_points={  # Define terminal commands for each script
         'console_scripts': [
             'buildSqlite=precisionprodb.buildSqlite:main',
+            'buildPeptideSqlite=precisionprodb.peptideSqlite:main',
             'downloadHuman=precisionprodb.downloadHuman:main',
             'extractMutatedUniprot=precisionprodb.extractMutatedUniprot:main',
             'generatePEFFoutput=precisionprodb.generatePEFFoutput:main',

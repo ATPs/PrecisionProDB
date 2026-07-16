@@ -1038,7 +1038,7 @@ def save_mutation_and_proteins(df_transcript3, outprefix):
     columns_keep = [e for e in columns_keep if e in df_transcript3.columns]
     if df_transcript3.shape[0] == 0:
         print('no protein with AA change')
-        return None
+        return pd.DataFrame()
     df_sum_mutations = df_transcript3[(df_transcript3['AA_seq'] != df_transcript3['new_AA']) & (pd.notnull(df_transcript3['new_AA']))][columns_keep]
     
     outfilename = outprefix +'.aa_mutations.csv'
@@ -1053,6 +1053,10 @@ def save_mutation_and_proteins(df_transcript3, outprefix):
         if pd.notnull(r['new_AA']) and r['new_AA'] != r['AA_seq']:
             fout.write('>{}\tchanged\n{}\n'.format(r['protein_description'], r['new_AA']))
     fout.close()
+    return df_transcript3[
+        (df_transcript3['AA_seq'] != df_transcript3['new_AA']) &
+        (pd.notnull(df_transcript3['new_AA']))
+    ].reset_index()
 
 class PerChrom(object):
     """
@@ -1118,7 +1122,7 @@ class PerChrom(object):
             df_transcript3['len_alt_AA'] = df_transcript3['new_AA'].str.len()
         
         if save_results:
-            save_mutation_and_proteins(df_transcript3, outprefix)
+            return save_mutation_and_proteins(df_transcript3, outprefix)
         else:
             return df_transcript3
 

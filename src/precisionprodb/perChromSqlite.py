@@ -215,7 +215,7 @@ def save_mutation_and_proteins(df_transcript3, outprefix):
     columns_keep = [e for e in columns_keep if e in df_transcript3.columns]
     if df_transcript3.shape[0] == 0:
         print('no protein with AA change')
-        return None
+        return pd.DataFrame()
     df_sum_mutations = df_transcript3[(df_transcript3['AA_seq'] != df_transcript3['new_AA']) & (pd.notnull(df_transcript3['new_AA']))][columns_keep]
     
     df_sum_mutations = df_sum_mutations.reset_index()
@@ -235,6 +235,7 @@ def save_mutation_and_proteins(df_transcript3, outprefix):
         if pd.notnull(r['new_AA']) and r['new_AA'] != r['AA_seq']:
             fout.write('>{}\tchanged\n{}\n'.format(r['protein_id_fasta'], r['new_AA']))
     fout.close()
+    return df_sum_mutations
 def _init_translation_worker(df_mutations):
     global _TRANSLATION_DF_MUTATIONS
     _TRANSLATION_DF_MUTATIONS = df_mutations
@@ -434,9 +435,9 @@ class PerChrom_sqlite(object):
         
         if save_results:
             if individual is None or individual == '' or individual == 'None' or individual == [] or individual == 'ALL_VARIANTS':
-                perChrom.save_mutation_and_proteins(df_transcript3, outprefix)
+                return perChrom.save_mutation_and_proteins(df_transcript3, outprefix)
             else:
-                save_mutation_and_proteins(df_transcript3, outprefix)
+                return save_mutation_and_proteins(df_transcript3, outprefix)
         else:
             return df_transcript3
 

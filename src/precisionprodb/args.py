@@ -188,6 +188,66 @@ ARGUMENT_SPECS = {
             'type': str,
         },
     },
+    'peptide': {
+        'flags': ('--peptide',),
+        'kwargs': {
+            'help': 'Generate globally novel altered-protein peptides using a canonical peptide SQLite index.',
+            'action': 'store_true',
+        },
+    },
+    'peptide_sqlite': {
+        'flags': ('--peptide-sqlite',),
+        'kwargs': {
+            'help': 'Canonical peptide SQLite index. Default: a profile-specific path beside --sqlite.',
+            'default': '',
+        },
+    },
+    'peptide_enzyme': {
+        'flags': ('--peptide-enzyme',),
+        'kwargs': {'default': 'Trypsin', 'help': 'Peptide digestion enzyme. Default: Trypsin.'},
+    },
+    'peptide_missed_cleavages': {
+        'flags': ('--peptide-missed-cleavages',),
+        'kwargs': {'type': int, 'default': 2, 'help': 'Maximum missed cleavages. Default: 2.'},
+    },
+    'peptide_min_length': {
+        'flags': ('--peptide-min-length',),
+        'kwargs': {'type': int, 'default': 7, 'help': 'Minimum peptide length. Default: 7.'},
+    },
+    'peptide_max_length': {
+        'flags': ('--peptide-max-length',),
+        'kwargs': {'type': int, 'default': 35, 'help': 'Maximum peptide length. Default: 35.'},
+    },
+    'peptide_specificity': {
+        'flags': ('--peptide-specificity',),
+        'kwargs': {
+            'default': 'full',
+            'choices': ['full', 'n-specific', 'c-specific', 'semi'],
+            'help': 'Cleavage specificity. Default: full.',
+        },
+    },
+    'peptide_initiator_methionine': {
+        'flags': ('--peptide-initiator-methionine',),
+        'kwargs': {
+            'default': 'both',
+            'choices': ['both', 'remove', 'retain'],
+            'help': 'N-terminal methionine handling. Default: both.',
+        },
+    },
+    'peptide_isobaric': {
+        'flags': ('--peptide-isobaric',),
+        'kwargs': {
+            'action': 'store_true',
+            'help': 'Normalize I to L before peptide comparison and output.',
+        },
+    },
+    'rebuild_peptide_sqlite': {
+        'flags': ('--rebuild-peptide-sqlite',),
+        'kwargs': {
+            'action': 'store_true',
+            'help': 'Atomically rebuild the peptide SQLite index before analysis.',
+        },
+    },
     'info_field': {
         'flags': ('--info_field',),
         'kwargs': {
@@ -324,6 +384,11 @@ ARGUMENT_GROUPS = {
     'download_uniprot': ('download', 'uniprot', 'uniprot_min_len', 'peff'),
     'cleanup': ('keep_all',),
     'sqlite': ('sqlite',),
+    'peptide': (
+        'peptide', 'peptide_sqlite', 'peptide_enzyme', 'peptide_missed_cleavages',
+        'peptide_min_length', 'peptide_max_length', 'peptide_specificity',
+        'peptide_initiator_methionine', 'peptide_isobaric', 'rebuild_peptide_sqlite',
+    ),
     'perchrom': ('chromosome',),
     'perchrom_sqlite': ('chromosome', 'sample_perchrom'),
     'vcf_conversion': (
