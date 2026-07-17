@@ -1,5 +1,9 @@
 # Example files to for testing PrecisionProDB
 
+## Novel peptide output
+
+`--peptide` generates digestion products from altered proteins that are absent from the canonical proteome under the same digestion profile. It requires SQLite annotation mode and adds `PREFIX.pergeno.peptide_novel.tsv` and `PREFIX.pergeno.peptide_novel.fa` to the usual outputs. A runnable workflow using the bundled GENCODE files is in [GENCODE/README.md](GENCODE/README.md); see the [Novel peptide output](https://github.com/ATPs/PrecisionProDB/wiki/Novel-peptide-output) Wiki page for index reuse, parameters, and output details.
+
 ## Variant files
 * a small vcf file: celline.vcf.gz
 * a small tsv file: gnomAD.variant.txt.gz

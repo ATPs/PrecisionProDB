@@ -45,3 +45,37 @@ The output files are
 * GENCODE.vcf.vcf2mutation_1.tsv.gz
 * GENCODE.vcf.vcf2mutation_2.tsv.gz
 
+## Novel peptide output
+
+`--peptide` reports altered-protein digestion products that are absent from the canonical GENCODE proteome under the same digestion profile. It requires a real annotation SQLite file; do not use `--sqlite NONE`.
+
+Run the following commands from the PrecisionProDB repository root. The first command builds the annotation SQLite. The second command enables peptide mode and automatically creates a profile-specific canonical peptide SQLite index beside it when one is not already present.
+
+```bash
+python src/precisionprodb/buildSqlite.py \
+  -S examples/GENCODE/GENCODE.peptide.sqlite \
+  -g examples/GENCODE/GENCODE.genome.fa.gz \
+  -p examples/GENCODE/GENCODE.protein.fa.gz \
+  -f examples/GENCODE/GENCODE.gtf.gz \
+  -a GENCODE_GTF \
+  -o examples/GENCODE/GENCODE.peptide.build \
+  -t 2
+
+python src/precisionprodb/PrecisionProDB.py \
+  -m examples/celline.vcf.gz \
+  -S examples/GENCODE/GENCODE.peptide.sqlite \
+  -o examples/GENCODE/GENCODE.peptide \
+  -a GENCODE_GTF \
+  --peptide \
+  -t 2
+
+sed -n '1,4p' examples/GENCODE/GENCODE.peptide.pergeno.peptide_novel.tsv
+sed -n '1,8p' examples/GENCODE/GENCODE.peptide.pergeno.peptide_novel.fa
+```
+
+In addition to the ordinary VCF outputs, this creates the following uncompressed files:
+
+* `GENCODE.peptide.pergeno.peptide_novel.tsv`: peptide-to-altered-protein mappings with mutation and digestion-profile annotations.
+* `GENCODE.peptide.pergeno.peptide_novel.fa`: nonredundant peptide sequences with `PPDBpep_######|n_mappings=N` headers.
+
+The default profile uses Trypsin, two missed cleavages, lengths 7–35, full specificity, both initiator-methionine forms, and exact I/L comparison. See the [Novel peptide output](https://github.com/ATPs/PrecisionProDB/wiki/Novel-peptide-output) Wiki page for custom profiles, reusable indexes, and complete output-column descriptions.
