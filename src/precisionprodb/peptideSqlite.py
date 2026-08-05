@@ -12,9 +12,19 @@ import sqlite3
 import sys
 
 if __package__:
-    from .digestion import iter_digest_sequence_occurrences, read_fasta_records
+    from .digestion import (
+        DEFAULT_ENZYME,
+        iter_digest_sequence_occurrences,
+        read_fasta_records,
+        resolve_enzyme_name,
+    )
 else:
-    from digestion import iter_digest_sequence_occurrences, read_fasta_records
+    from digestion import (
+        DEFAULT_ENZYME,
+        iter_digest_sequence_occurrences,
+        read_fasta_records,
+        resolve_enzyme_name,
+    )
 
 
 SCHEMA_VERSION = 1
@@ -37,6 +47,8 @@ class PeptideConfig:
     def __post_init__(self):
         if self.mode != 'enzyme':
             raise ValueError("only peptide mode 'enzyme' is supported")
+        canonical_enzyme = resolve_enzyme_name(self.enzyme) or DEFAULT_ENZYME
+        object.__setattr__(self, 'enzyme', canonical_enzyme)
         if self.missed_cleavages < 0:
             raise ValueError('missed_cleavages must be at least 0')
         if self.min_length < 1:
@@ -100,12 +112,40 @@ def _package_version():
         return 'unknown'
 
 
+def _readonly_sqlite_uri(path, immutable=False):
+    """Return a URI-safe absolute SQLite read-only connection string."""
+    parameters = 'mode=ro'
+    if immutable:
+        parameters += '&immutable=1'
+    return f'{Path(path).resolve().as_uri()}?{parameters}'
+
+
+def _ensure_distinct_database_paths(source_sqlite, output_sqlite):
+    """Reject output paths that resolve to the annotation SQLite itself."""
+    source_path = Path(source_sqlite).resolve()
+    output_path = Path(output_sqlite).resolve()
+    if os.path.exists(output_sqlite):
+        try:
+            same_file = os.path.samefile(source_sqlite, output_sqlite)
+        except OSError as exc:
+            raise ValueError(
+                f'cannot compare annotation and peptide SQLite paths: {exc}'
+            ) from exc
+    else:
+        same_file = source_path == output_path
+    if same_file:
+        raise ValueError(
+            'annotation SQLite and peptide SQLite must be different files: '
+            f'{source_path}'
+        )
+
+
 def _source_proteome_fingerprint(source_sqlite):
     """Hash a stable protein-id/sequence representation, not SQLite file bytes."""
     source = str(source_sqlite)
     digest = hashlib.sha256()
     protein_count = 0
-    uri = f'file:{Path(source).absolute()}?mode=ro'
+    uri = _readonly_sqlite_uri(source)
     connection = sqlite3.connect(uri, uri=True)
     try:
         for protein_id, sequence in connection.execute(
@@ -164,6 +204,7 @@ def build_peptide_sqlite(source_sqlite, output_sqlite, peptide_config, threads=1
     output_sqlite = str(output_sqlite)
     if not os.path.exists(source_sqlite):
         raise FileNotFoundError(source_sqlite)
+    _ensure_distinct_database_paths(source_sqlite, output_sqlite)
     output_parent = os.path.dirname(os.path.abspath(output_sqlite))
     os.makedirs(output_parent, exist_ok=True)
     if os.path.exists(output_sqlite) and not force:
@@ -184,7 +225,7 @@ def build_peptide_sqlite(source_sqlite, output_sqlite, peptide_config, threads=1
         connection = sqlite3.connect(temporary)
         _create_schema(connection)
         connection.execute('BEGIN IMMEDIATE')
-        source_uri = f'file:{Path(source_sqlite).absolute()}?mode=ro'
+        source_uri = _readonly_sqlite_uri(source_sqlite)
         # Pool.imap consumes its input generator in a feeder thread.
         source_connection = sqlite3.connect(source_uri, uri=True, check_same_thread=False)
         peptide_batch = set()
@@ -291,33 +332,91 @@ def build_peptide_sqlite(source_sqlite, output_sqlite, peptide_config, threads=1
 
 
 def validate_peptide_sqlite(peptide_sqlite, peptide_config, source_sqlite=None):
-    """Validate index structure, profile, completion marker, and source proteome."""
+    """Validate index integrity, structure, profile, and source proteome."""
     if not isinstance(peptide_config, PeptideConfig):
         raise TypeError('peptide_config must be a PeptideConfig')
     peptide_sqlite = str(peptide_sqlite)
     if not os.path.exists(peptide_sqlite):
         raise FileNotFoundError(peptide_sqlite)
-    uri = f'file:{Path(peptide_sqlite).absolute()}?mode=ro'
-    connection = sqlite3.connect(uri, uri=True)
+    uri = _readonly_sqlite_uri(peptide_sqlite)
+    connection = None
     try:
+        connection = sqlite3.connect(uri, uri=True)
+        quick_check = [row[0] for row in connection.execute('PRAGMA quick_check')]
+        if quick_check != ['ok']:
+            details = '; '.join(str(item) for item in quick_check)
+            raise ValueError(f'peptide SQLite integrity check failed: {details}')
+        user_version = connection.execute('PRAGMA user_version').fetchone()[0]
+        if user_version != SCHEMA_VERSION:
+            raise ValueError('unsupported peptide SQLite user_version')
         tables = {row[0] for row in connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         )}
         if {'metadata', 'known_peptide'} - tables:
             raise ValueError(f'not a peptide SQLite index: {peptide_sqlite}')
+        required_columns = {
+            'metadata': {'key', 'value'},
+            'known_peptide': {'peptide_key'},
+        }
+        required_primary_keys = {
+            'metadata': {'key'},
+            'known_peptide': {'peptide_key'},
+        }
+        for table, required in required_columns.items():
+            table_info = list(connection.execute(f'PRAGMA table_info({table})'))
+            columns = {row[1] for row in table_info}
+            if required - columns:
+                raise ValueError(f'peptide SQLite table {table} has an unsupported schema')
+            primary_key_columns = {row[1] for row in table_info if row[5]}
+            if primary_key_columns != required_primary_keys[table]:
+                raise ValueError(f'peptide SQLite table {table} has an unsupported primary key')
         metadata = dict(connection.execute('SELECT key, value FROM metadata'))
+        actual_known_count = connection.execute(
+            'SELECT COUNT(*) FROM known_peptide'
+        ).fetchone()[0]
+    except sqlite3.Error as exc:
+        raise ValueError(f'cannot validate peptide SQLite {peptide_sqlite}: {exc}') from exc
     finally:
-        connection.close()
+        if connection is not None:
+            connection.close()
     if metadata.get('schema_version') != str(SCHEMA_VERSION):
         raise ValueError('unsupported peptide SQLite schema version')
     if metadata.get('build_complete') != '1':
         raise ValueError('peptide SQLite build is incomplete')
     if metadata.get('digestion_semantics_version') != str(DIGESTION_SEMANTICS_VERSION):
         raise ValueError('peptide SQLite digestion semantics do not match this version')
-    if metadata.get('digestion_config_hash') != peptide_config.config_hash:
+    stored_config_json = metadata.get('digestion_config_json')
+    stored_config_hash = metadata.get('digestion_config_hash')
+    if not stored_config_json or not stored_config_hash:
+        raise ValueError('peptide SQLite digestion configuration metadata is incomplete')
+    calculated_config_hash = hashlib.sha256(stored_config_json.encode()).hexdigest()
+    if calculated_config_hash != stored_config_hash:
+        raise ValueError('peptide SQLite digestion configuration metadata is inconsistent')
+    try:
+        stored_config_payload = json.loads(stored_config_json)
+        if not isinstance(stored_config_payload, dict):
+            raise ValueError('configuration JSON must be an object')
+        stored_config = PeptideConfig(**stored_config_payload)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError(f'peptide SQLite digestion configuration is invalid: {exc}') from exc
+    if stored_config != peptide_config:
         raise ValueError('peptide SQLite configuration does not match requested peptide mode')
+    try:
+        expected_known_count = int(metadata['known_peptide_count'])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError('peptide SQLite known peptide count metadata is invalid') from exc
+    if actual_known_count != expected_known_count:
+        raise ValueError(
+            'peptide SQLite known peptide count does not match metadata: '
+            f'expected {expected_known_count}, found {actual_known_count}'
+        )
     if source_sqlite is not None:
-        source_hash, source_count = _source_proteome_fingerprint(source_sqlite)
+        try:
+            source_hash, source_count = _source_proteome_fingerprint(source_sqlite)
+        except sqlite3.Error as exc:
+            raise ValueError(
+                f'cannot validate annotation SQLite {source_sqlite}: {exc}'
+            ) from exc
         if source_hash != metadata.get('source_proteome_sha256'):
             raise ValueError('peptide SQLite source proteome does not match annotation SQLite')
         if str(source_count) != metadata.get('source_protein_count'):
@@ -349,7 +448,7 @@ class KnownPeptideIndex:
 
     def __init__(self, peptide_sqlite):
         self.peptide_sqlite = str(peptide_sqlite)
-        uri = f'file:{Path(self.peptide_sqlite).absolute()}?mode=ro&immutable=1'
+        uri = _readonly_sqlite_uri(self.peptide_sqlite, immutable=True)
         self.connection = sqlite3.connect(uri, uri=True)
         self.connection.execute('PRAGMA temp_store=MEMORY')
         self.connection.execute('PRAGMA mmap_size=1073741824')
