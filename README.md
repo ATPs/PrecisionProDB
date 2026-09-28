@@ -205,10 +205,15 @@ filepath	sample	name_use
 - `sample` is optional. If omitted, PrecisionProDB uses the first sample column in that VCF.
 - `name_use` is optional. If omitted, PrecisionProDB uses the selected sample name. If output names are duplicated, it prints a warning and uses VCF filename-derived names for the duplicated entries.
 - `-t/--threads` parses manifest rows in parallel, with one VCF file per worker.
+- The manifest itself may be plain text or gzip compressed.
 
 ### Reusing an output prefix
 
-PrecisionProDB writes a `<prefix>.run.json` receipt after a complete run. Repeating the same command with unchanged inputs and settings reuses the validated outputs. If an input, an output, or a retained intermediate file has changed, the run stops rather than mixing files from different runs. Use a fresh prefix, or pass `--force` to rebuild this prefix. `--force` is long-only because `-f` selects the GTF file. An external SQLite database supplied with `-S` is preserved; a database built for this prefix is rebuilt. With `--keep_all --force`, previous generated files are moved under `<prefix>.archive/` before rebuilding.
+PrecisionProDB writes a `<prefix>.run.json` receipt after a complete run. Repeating the same command with unchanged inputs and settings reuses the validated outputs. If an input, an output, or a retained intermediate file has changed, the run stops rather than mixing files from different runs. Protein FASTA files are checked even when annotation comes from an existing SQLite database. Use a fresh prefix, or pass `--force` to rebuild this prefix. `--force` is long-only because `-f` selects the GTF file. An external SQLite database supplied with `-S` is preserved; a database built for this prefix is rebuilt. With `--keep_all --force`, previous generated files are moved under `<prefix>.archive/` before rebuilding. Receipts written before format 3 cannot be reused automatically and require a fresh prefix or `--force`.
+
+An existing SQLite database is treated as external unless a matching format-3 receipt records that this run owns it, even at the default `<prefix>.sqlite` path. Older or missing receipts do not authorize deleting the database during `--force`.
+
+Intermediate files owned by a run are stored below `<prefix>_temp/`, including the two haplotype work areas used by the legacy VCF workflow. A similarly named prefix such as `<prefix>_1` is an independent run and is never cleaned with `<prefix>`. Protein identifiers in the mutation table match the corresponding changed-protein FASTA identifiers exactly.
 
 The standalone `vcf2mutation` converter also checks its output receipt before reusing a `.done` marker. Its `--force` option rebuilds a stale conversion. The standalone `buildSqlite` command refuses to replace an existing database or reuse stale split files unless `--force` is given; it builds a replacement database before installing it.
 

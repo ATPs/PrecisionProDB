@@ -1,6 +1,8 @@
 """Provenance and safe reuse for a PrecisionProDB output prefix."""
 
 import glob
+import csv
+import gzip
 import hashlib
 import json
 import os
@@ -9,7 +11,8 @@ import tempfile
 import time
 
 
-FORMAT_VERSION = 2
+RUN_RECEIPT_VERSION = 3
+STAGE_CACHE_VERSION = 2
 OUTPUT_SUFFIXES = (
     '.pergeno.protein_all.fa', '.pergeno.protein_changed.fa',
     '.pergeno.aa_mutations.csv', '.pergeno.protein_PEFF.fa',
@@ -21,10 +24,6 @@ OUTPUT_SUFFIXES = (
     '.vcf2mutation.tsv.cache.json',
     '.aa_mutations.csv', '.mutated_protein.fa',
     '.vcf2mutation_1.tsv', '.vcf2mutation_2.tsv',
-    '_1.pergeno.protein_all.fa', '_1.pergeno.protein_changed.fa',
-    '_1.pergeno.aa_mutations.csv',
-    '_2.pergeno.protein_all.fa', '_2.pergeno.protein_changed.fa',
-    '_2.pergeno.aa_mutations.csv',
 )
 
 
@@ -44,10 +43,26 @@ def mutation_files(value, is_manifest=False):
     if not value:
         return []
     if is_manifest:
-        import csv
-        with open(value, newline='') as handle:
+        opener = gzip.open if value.lower().endswith('.gz') else open
+        with opener(value, 'rt', newline='') as handle:
             reader = csv.DictReader(handle, delimiter='\t')
-            return [value] + [row['filepath'] for row in reader]
+            if not reader.fieldnames or reader.fieldnames[0] != 'filepath':
+                raise ValueError(
+                    f'manifest {value} must have filepath as its first header column'
+                )
+            paths = [value]
+            for row_number, row in enumerate(reader, start=2):
+                path = str(row.get('filepath', '')).strip()
+                if not path:
+                    raise ValueError(
+                        f'manifest {value} has an empty filepath in row {row_number}'
+                    )
+                if not os.path.isfile(path):
+                    raise FileNotFoundError(
+                        f'manifest filepath not found in row {row_number}: {path}'
+                    )
+                paths.append(path)
+            return paths
     if os.path.isfile(value):
         return [value]
     if ',' in value and all(os.path.isfile(piece) for piece in value.split(',')):
@@ -62,7 +77,11 @@ def _stable_inputs(file_mutations, file_sqlite, file_genome, file_gtf,
     if file_sqlite and os.path.isfile(file_sqlite):
         paths.append(file_sqlite)
     else:
-        paths.extend(p for p in (file_genome, file_gtf, file_protein) if p)
+        paths.extend(p for p in (file_genome, file_gtf) if p)
+    # An explicit protein FASTA remains an input when an existing SQLite file
+    # supplies annotation because PEFF and UniProt projection still consume it.
+    if file_protein:
+        paths.append(file_protein)
     paths.extend(p for p in files_uniprot.split(',') if p)
     seen = set()
     result = []
@@ -75,12 +94,19 @@ def _stable_inputs(file_mutations, file_sqlite, file_genome, file_gtf,
     return result
 
 
-def _generated_paths(outprefix, owned_sqlite_path=None):
+def _owned_candidates(outprefix, owned_sqlite_path=None):
     paths = [outprefix + suffix for suffix in OUTPUT_SUFFIXES]
-    paths.extend(outprefix + suffix for suffix in ('_temp', '_1_temp', '_2_temp'))
+    paths.append(outprefix + '_temp')
     if owned_sqlite_path:
         paths.append(owned_sqlite_path)
-    return [path for path in paths if os.path.lexists(path)]
+    return [os.path.abspath(path) for path in paths]
+
+
+def _generated_paths(outprefix, owned_sqlite_path=None):
+    return [
+        path for path in _owned_candidates(outprefix, owned_sqlite_path)
+        if os.path.lexists(path)
+    ]
 
 
 def sqlite_owned_by_run(outprefix, file_sqlite, file_genome, file_gtf,
@@ -94,15 +120,21 @@ def sqlite_owned_by_run(outprefix, file_sqlite, file_genome, file_gtf,
             with open(receipt) as handle:
                 previous = json.load(handle)
             settings = previous.get('settings', {})
-            if settings.get('sqlite') == os.path.abspath(file_sqlite):
+            if (previous.get('format_version') == RUN_RECEIPT_VERSION and
+                    settings.get('sqlite') == os.path.abspath(file_sqlite)):
                 return bool(settings.get('owned_sqlite'))
         except (OSError, ValueError):
             pass  # RunState.prepare reports the invalid receipt.
+    # The default filename is not evidence of ownership. Without a matching
+    # current receipt, preserve any existing database, including when an old
+    # receipt was rejected or the caller omitted --sqlite.
     return bool(file_genome and file_gtf and file_protein and
-                (not os.path.exists(file_sqlite) or default_mode))
+                not os.path.exists(file_sqlite))
 
 
 def _write_json(path, value):
+    parent = os.path.dirname(os.path.abspath(path))
+    os.makedirs(parent, exist_ok=True)
     temporary = path + f'.tmp.{os.getpid()}'
     with open(temporary, 'w') as handle:
         json.dump(value, handle, indent=2, sort_keys=True)
@@ -114,15 +146,14 @@ def _write_json(path, value):
 
 def _temporary_artifacts(outprefix):
     result = {}
-    for suffix in ('_temp', '_1_temp', '_2_temp'):
-        folder = outprefix + suffix
-        if not os.path.isdir(folder):
-            continue
-        for root, _directories, files in os.walk(folder):
-            for name in files:
-                path = os.path.join(root, name)
-                stat = os.stat(path)
-                result[os.path.abspath(path)] = [stat.st_size, stat.st_mtime_ns]
+    folder = outprefix + '_temp'
+    if not os.path.isdir(folder):
+        return result
+    for root, _directories, files in os.walk(folder):
+        for name in files:
+            path = os.path.join(root, name)
+            stat = os.stat(path)
+            result[os.path.abspath(path)] = [stat.st_size, stat.st_mtime_ns]
     return result
 
 
@@ -138,7 +169,7 @@ class RunState:
         self.owned_sqlite = owned_sqlite
         self.owned_sqlite_path = (settings.get('sqlite') or outprefix + '.sqlite') if owned_sqlite else None
         self.current = {
-            'format_version': FORMAT_VERSION,
+            'format_version': RUN_RECEIPT_VERSION,
             'inputs': inputs,
             'settings': settings,
         }
@@ -161,7 +192,11 @@ class RunState:
                 with open(self.path) as handle:
                     previous = json.load(handle)
             except (OSError, ValueError) as exc:
-                raise ValueError(f'unreadable run receipt {self.path}: {exc}') from exc
+                if not self.force:
+                    raise ValueError(
+                        f'unreadable run receipt {self.path}: {exc}; use a fresh '
+                        'prefix or --force'
+                    ) from exc
         generated = _generated_paths(self.outprefix, self.owned_sqlite_path)
         if self.force:
             if generated or previous:
@@ -181,12 +216,39 @@ class RunState:
         elif previous is None and generated:
             raise ValueError(f'unverified generated files exist for {self.outprefix}; use a fresh prefix or --force')
         elif previous is not None:
+            if previous.get('format_version') != RUN_RECEIPT_VERSION:
+                raise ValueError(
+                    f'run receipt format {previous.get("format_version")} is not '
+                    f'compatible with format {RUN_RECEIPT_VERSION}; use a fresh '
+                    'prefix or --force to rebuild'
+                )
             for key, value in self.current.items():
                 if previous.get(key) != value:
                     raise ValueError(f'run inputs/settings changed for {self.outprefix}; use a fresh prefix or --force')
             if previous.get('status') != 'complete':
                 raise ValueError(f'previous run for {self.outprefix} was incomplete; use --force to rebuild')
+            allowed = set(_owned_candidates(
+                self.outprefix, self.owned_sqlite_path
+            ))
+            recorded_owned = set(previous.get('owned_paths', []))
+            if not recorded_owned or not recorded_owned.issubset(allowed):
+                raise ValueError(
+                    f'run receipt has invalid output ownership for {self.outprefix}; '
+                    'use a fresh prefix or --force'
+                )
+            current_owned = set(_generated_paths(
+                self.outprefix, self.owned_sqlite_path
+            ))
+            if current_owned != recorded_owned:
+                raise ValueError(
+                    f'generated output set changed for {self.outprefix}; use --force'
+                )
             for path, expected in previous.get('outputs', {}).items():
+                if os.path.abspath(path) not in allowed:
+                    raise ValueError(
+                        f'run receipt references an unowned output: {path}; use '
+                        'a fresh prefix or --force'
+                    )
                 if not os.path.exists(path) or file_fingerprint(path)['sha256'] != expected:
                     raise ValueError(f'generated output changed or is missing: {path}; use --force')
             if _temporary_artifacts(self.outprefix) != previous.get('temporary_artifacts', {}):
@@ -236,7 +298,9 @@ class RunState:
             elif path.endswith(('.csv', '.tsv')):
                 with open(path) as handle:
                     counts[os.path.basename(path)] = max(0, sum(1 for _ in handle) - 1)
+        owned_paths = _generated_paths(self.outprefix, self.owned_sqlite_path)
         self.record('complete', outputs=outputs, counts=counts,
+                    owned_paths=owned_paths,
                     temporary_artifacts=_temporary_artifacts(self.outprefix))
 
     def fail(self, exc):
@@ -252,7 +316,7 @@ class StageCache:
         self.receipt = output + '.cache.json'
         self.force = force
         self.current = {
-            'format_version': FORMAT_VERSION,
+            'format_version': STAGE_CACHE_VERSION,
             'inputs': [
                 {key: fp[key] for key in ('path', 'sha256', 'size')}
                 for fp in (file_fingerprint(path) for path in input_files)

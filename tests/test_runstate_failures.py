@@ -1,5 +1,7 @@
 """Regression tests for safe reuse and complete reference-only output."""
 
+import gzip
+import json
 import sqlite3
 import subprocess
 import sys
@@ -10,7 +12,7 @@ import pytest
 from precisionprodb import PrecisionProDB_Sqlite as sqlite_pipeline
 from precisionprodb import buildSqlite
 from precisionprodb.PrecisionProDB_core import PerGeno
-from precisionprodb.runstate import RunState, sqlite_owned_by_run
+from precisionprodb.runstate import RunState, mutation_files, sqlite_owned_by_run
 from precisionprodb.vcf2mutation import convertVCF2MutationComplex
 
 
@@ -84,6 +86,75 @@ def test_prebuilt_explicit_sqlite_is_external_even_at_default_path(tmp_path):
     )
 
 
+@pytest.mark.parametrize('keep_all', [False, True])
+@pytest.mark.parametrize(
+    ('receipt_version', 'recorded_owned'),
+    [(2, False), (2, True), (3, False), (3, True), (None, None)],
+)
+def test_force_preserves_unverified_default_sqlite(
+        tmp_path, keep_all, receipt_version, recorded_owned):
+    prefix = str(tmp_path / 'sample')
+    database = tmp_path / 'sample.sqlite'
+    original = b'annotation database to preserve'
+    database.write_bytes(original)
+    if receipt_version is not None:
+        (tmp_path / 'sample.run.json').write_text(json.dumps({
+            'format_version': receipt_version,
+            'status': 'complete',
+            'settings': {'sqlite': str(database), 'owned_sqlite': recorded_owned},
+        }))
+    output = tmp_path / 'sample.pergeno.protein_all.fa'
+    output.write_text('>P\nMAK\n')
+
+    owned = sqlite_owned_by_run(
+        prefix, str(database), 'genome.fa', 'genes.gtf', 'protein.fa',
+        default_mode=True,
+    )
+    expected_owned = receipt_version == 3 and recorded_owned is True
+    assert owned is expected_owned
+    state = RunState(
+        prefix, [], {'sqlite': str(database), 'owned_sqlite': owned},
+        force=True, keep_all=keep_all, owned_sqlite=owned,
+    )
+    assert state.prepare() is False
+    assert not output.exists()
+    if expected_owned:
+        assert not database.exists()
+        if keep_all:
+            archived = list((tmp_path / 'sample.archive').glob('*/sample.sqlite'))
+            assert len(archived) == 1
+            assert archived[0].read_bytes() == original
+    else:
+        assert database.read_bytes() == original
+        assert not list((tmp_path / 'sample.archive').glob('*/sample.sqlite'))
+
+
+def test_external_sqlite_still_fingerprints_explicit_protein_fasta(tmp_path):
+    variants = tmp_path / 'variants.tsv'
+    variants.write_text('chr\tpos\tref\talt\n')
+    database = tmp_path / 'annotation.sqlite'
+    database.write_bytes(b'external annotation')
+    protein = tmp_path / 'proteins.fa'
+    protein.write_text('>P\nMAK\n')
+    prefix = str(tmp_path / 'sample')
+
+    def state():
+        return RunState.from_inputs(
+            prefix, str(variants), str(database), '', '', str(protein), '',
+            False, {'sqlite': str(database)},
+        )
+
+    first = state()
+    first.prepare()
+    (tmp_path / 'sample.pergeno.protein_all.fa').write_text('>P\nMAK\n')
+    (tmp_path / 'sample.pergeno.protein_changed.fa').write_text('')
+    (tmp_path / 'sample.pergeno.aa_mutations.csv').write_text('protein_id_fasta\n')
+    first.complete()
+    protein.write_text('>P\nMVK\n')
+    with pytest.raises(ValueError, match='inputs/settings changed'):
+        state().prepare()
+
+
 def test_retained_legacy_haplotype_intermediates_are_checked(tmp_path):
     variants = tmp_path / 'variants.vcf'
     variants.write_text('fixture\n')
@@ -100,8 +171,10 @@ def test_retained_legacy_haplotype_intermediates_are_checked(tmp_path):
     (tmp_path / 'sample.pergeno.protein_all.fa').write_text('>P\nMAK\n')
     (tmp_path / 'sample.pergeno.protein_changed.fa').write_text('')
     (tmp_path / 'sample.pergeno.aa_mutations.csv').write_text('protein_id_fasta\n')
-    haplotype_temp = tmp_path / 'sample_1_temp'
-    haplotype_temp.mkdir()
+    independent_fasta = tmp_path / 'sample_1.pergeno.protein_all.fa'
+    independent_fasta.write_text('>independent\nMAK\n')
+    haplotype_temp = tmp_path / 'sample_temp' / 'haplotypes'
+    haplotype_temp.mkdir(parents=True)
     marker = haplotype_temp / '1.perChromFinished'
     marker.write_text('1')
     first.complete()
@@ -111,6 +184,59 @@ def test_retained_legacy_haplotype_intermediates_are_checked(tmp_path):
         state().prepare()
     assert state(force=True).prepare() is False
     assert not haplotype_temp.exists()
+    assert independent_fasta.read_text() == '>independent\nMAK\n'
+
+
+def test_version_two_receipt_requires_explicit_rebuild(tmp_path):
+    prefix = str(tmp_path / 'sample')
+    database = tmp_path / 'external.sqlite'
+    database.write_bytes(b'external annotation')
+    (tmp_path / 'sample.run.json').write_text(json.dumps({
+        'format_version': 2,
+        'status': 'complete',
+        'settings': {'sqlite': str(database), 'owned_sqlite': True},
+    }))
+    (tmp_path / 'sample.pergeno.protein_all.fa').write_text('>P\nMAK\n')
+    neighbor = tmp_path / 'sample_1.pergeno.protein_all.fa'
+    neighbor.write_text('>neighbor\nMST\n')
+
+    state = RunState(
+        prefix, [], {'sqlite': str(database)}, owned_sqlite=False,
+    )
+    with pytest.raises(ValueError, match='receipt format 2'):
+        state.prepare()
+    rebuilt = RunState(
+        prefix, [], {'sqlite': str(database)}, force=True,
+        owned_sqlite=False,
+    )
+    assert rebuilt.prepare() is False
+    assert database.read_bytes() == b'external annotation'
+    assert neighbor.read_text() == '>neighbor\nMST\n'
+
+
+def test_gzipped_manifest_inputs_are_fingerprinted(tmp_path):
+    vcf = tmp_path / 'sample.vcf'
+    vcf.write_text('##fileformat=VCFv4.2\n')
+    manifest = tmp_path / 'manifest.tsv.gz'
+    with gzip.open(manifest, 'wt') as handle:
+        handle.write(f'filepath\n  {vcf}  \n')
+
+    assert mutation_files(str(manifest), is_manifest=True) == [
+        str(manifest), str(vcf)
+    ]
+    state = RunState.from_inputs(
+        str(tmp_path / 'out'), str(manifest), '', '', '', '', '', True, {},
+    )
+    assert [item['path'] for item in state.inputs] == [
+        str(manifest.resolve()), str(vcf.resolve())
+    ]
+
+
+def test_receipt_writer_creates_nested_output_directory(tmp_path):
+    prefix = str(tmp_path / 'new' / 'nested' / 'sample')
+    state = RunState(prefix, [], {})
+    assert state.prepare() is False
+    assert (tmp_path / 'new' / 'nested' / 'sample.run.json').is_file()
 
 
 def test_standalone_sqlite_build_rejects_stale_split_files(tmp_path):
@@ -209,6 +335,8 @@ def test_converter_cache_checks_selection_and_force(tmp_path):
     )
     prefix = str(tmp_path / 'converted')
     assert convertVCF2MutationComplex(str(source), prefix, individual_input='A') == ['A__1', 'A__2']
+    receipt = json.loads((tmp_path / 'converted.tsv.cache.json').read_text())
+    assert receipt['format_version'] == 2
     with pytest.raises(ValueError, match='inputs/settings changed'):
         convertVCF2MutationComplex(str(source), prefix, individual_input='B')
     assert convertVCF2MutationComplex(str(source), prefix, individual_input='B', force=True) == ['B__1', 'B__2']

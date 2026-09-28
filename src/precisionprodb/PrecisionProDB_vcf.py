@@ -2,6 +2,7 @@ import pandas as pd
 from Bio import SeqIO
 import gzip
 import os
+import shutil
 
 if __package__:
     from .args import add_argument_set
@@ -75,9 +76,15 @@ def runPerGenoVCF(
     file_mutations_1 = outprefix_vcf + '_1.tsv'
     file_mutations_2 = outprefix_vcf + '_2.tsv'
 
+    # Keep haplotype-specific work below the main prefix's owned temporary
+    # directory so similarly named user prefixes (for example sample_1) are
+    # never treated as artifacts of this run.
+    haplotype_folder = os.path.join(outprefix + '_temp', 'haplotypes')
+    os.makedirs(haplotype_folder, exist_ok=True)
+
     # run perGeno for mutations_1
     print('start running PrecisionProDB for first strand of the genome mutation file')
-    outprefix_1 = outprefix + '_1'
+    outprefix_1 = os.path.join(haplotype_folder, 'haplotype_1')
     pergeno_1 = PerGeno(file_genome = file_genome, file_gtf=file_gtf, file_mutations = file_mutations_1, file_protein=file_protein, threads=threads, outprefix=outprefix_1, datatype=datatype, protein_keyword=protein_keyword, keep_all=keep_all)
     print(pergeno_1.__dict__)
     pergeno_1.splitInputByChromosomes()
@@ -85,7 +92,7 @@ def runPerGenoVCF(
 
     # run perGeno for mutations_2
     print('start running PrecisionProDB for second strand of the genome mutation file')
-    outprefix_2 = outprefix + '_2'
+    outprefix_2 = os.path.join(haplotype_folder, 'haplotype_2')
     pergeno_2 = PerGeno(file_genome = file_genome, file_gtf=file_gtf, file_mutations = file_mutations_2, file_protein=file_protein, threads=threads, outprefix=outprefix_2, datatype=datatype, protein_keyword=protein_keyword, keep_all=keep_all)
     print(pergeno_1.__dict__)
     pergeno_2.splitInputByChromosomes()
@@ -102,6 +109,8 @@ def runPerGenoVCF(
     df_seqs_changed = pd.concat([df_seqs_changed_1,df_seqs_changed_2], ignore_index=True)
     if df_seqs_changed.shape[0] == 0:
         write_reference_only_vcf_outputs(file_protein, outprefix)
+        if not keep_all:
+            shutil.rmtree(haplotype_folder)
         print('no mutated proteins predicted; wrote reference-only outputs')
         return None
     
@@ -110,28 +119,30 @@ def runPerGenoVCF(
     fout_mutations_2 = outprefix_2 + '.pergeno.aa_mutations.csv'
     fout_mutations = outprefix + '.pergeno.aa_mutations.csv'
     try:
-        df_mutations_1 = pd.read_csv(fout_mutations_1, sep='\t')
+        df_mutations_1 = pd.read_csv(fout_mutations_1, sep='\t', converters={
+            'protein_id': str, 'protein_id_fasta': str,
+        })
     except:
         df_mutations_1 = pd.DataFrame()
     try:
-        df_mutations_2 = pd.read_csv(fout_mutations_2, sep='\t')
+        df_mutations_2 = pd.read_csv(fout_mutations_2, sep='\t', converters={
+            'protein_id': str, 'protein_id_fasta': str,
+        })
     except:
         df_mutations_2 = pd.DataFrame()
     df_mutations_1['batch'] = '1'
     df_mutations_2['batch'] = '2'
     df_mutations = pd.concat([df_mutations_1, df_mutations_2], ignore_index=True)
     if df_mutations.shape[0] == 0:
-        write_reference_only_vcf_outputs(file_protein, outprefix)
-        print('no mutated proteins predicted; wrote reference-only outputs')
-        return None
+        raise RuntimeError(
+            'changed protein intermediates exist but mutation annotations are '
+            'missing or empty'
+        )
 
-    # Per-chromosome annotation rows number alternate protein IDs (P__1),
-    # while their FASTA retains the source protein ID (P).
-    df_mutations['seq_id_base'] = df_mutations['protein_id_fasta'].str.replace(
-        r'__\d+$', '', regex=True
-    )
     df_joined = df_seqs_changed.merge(
-        df_mutations, left_on=['seq_id', 'batch'], right_on=['seq_id_base', 'batch']
+        df_mutations,
+        left_on=['seq_id', 'batch'],
+        right_on=['protein_id_fasta', 'batch'],
     )
     if df_joined.empty:
         raise ValueError('changed protein FASTA and mutation annotations have no matching IDs')
@@ -172,12 +183,7 @@ def runPerGenoVCF(
 
     # clean up files
     if not keep_all:
-        os.remove(fout_mutations_1)
-        os.remove(fout_mutations_2)
-        os.remove(fout_protein_changed_1)
-        os.remove(fout_protein_changed_2)
-        os.remove(fout_protein_all_1)
-        os.remove(fout_protein_all_2)
+        shutil.rmtree(haplotype_folder)
     print('perGeno_vcf finished!')
 
 

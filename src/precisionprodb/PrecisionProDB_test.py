@@ -58,14 +58,7 @@ def validate_case_outputs(output_prefix, key_input, expect_uniprot=False):
             raise RuntimeError('mutation table is missing the protein_id_fasta column')
         mutated_ids = {row['protein_id_fasta'] for row in rows if row.get('protein_id_fasta')}
     changed_ids = {record.id for record in changed_records}
-    # The direct variant-string path historically numbers table IDs while its
-    # FASTA uses the source protein ID. Accept that documented alias only.
-    absent = sorted(
-        protein_id for protein_id in mutated_ids
-        if protein_id not in changed_ids and
-        not (protein_id.rsplit('__', 1)[-1].isdigit() and
-             protein_id.rsplit('__', 1)[0] in changed_ids)
-    )
+    absent = sorted(mutated_ids - changed_ids)
     if absent:
         raise RuntimeError('mutation table proteins absent from changed FASTA: ' + ', '.join(absent[:10]))
 

@@ -643,7 +643,9 @@ def get_df_transcript2(file_gtf, file_protein, file_genome, cpu_counts, datatype
     # get df_gtf
     if cpu_counts is None or cpu_counts < 1:
         cpu_counts = 1
-    df_gtf = pd.read_csv(file_gtf, sep='\t',header=None, comment='#')
+    df_gtf = pd.read_csv(
+        file_gtf, sep='\t', header=None, comment='#', converters={8: str},
+    )
     df_gtf.columns = ['seqname','source','feature','start','end','score','strand','frame','protein_id']
     # change df_gtf seqname to str
     df_gtf['seqname'] = df_gtf['seqname'].astype(str)
@@ -1164,12 +1166,8 @@ def save_mutation_and_proteins(df_transcript3, outprefix):
         return pd.DataFrame(columns=output_columns)
 
     df_sum_mutations = df_sum_mutations.reset_index()
-    df_sum_mutations['protein_id_fasta_nth'] = df_sum_mutations.groupby('protein_id_fasta').cumcount() + 1
-    df_sum_mutations['protein_id_fasta'] = df_sum_mutations.apply(
-        lambda row: '{}__{}'.format(row['protein_id_fasta'], row['protein_id_fasta_nth']), axis=1
-    )
     df_sum_mutations[
-        [col for col in df_sum_mutations.columns if col not in ['new_AA', 'AA_seq', 'protein_id_fasta_nth']]
+        [col for col in df_sum_mutations.columns if col not in ['new_AA', 'AA_seq']]
     ].to_csv(outfilename, sep='\t', index=None)
     print('number of proteins with AA change:', df_sum_mutations.shape[0])
     

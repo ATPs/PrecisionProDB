@@ -721,7 +721,14 @@ class PerGeno(object):
         # collect mutation annotations
         files_mutAnno = ['{}/{}.aa_mutations.csv'.format(self.tempfolder, chromosome) for chromosome in chromosomes_mutated]
         file_mutAnno = self.outprefix + '.pergeno.aa_mutations.csv'
-        annotation_parts = [pd.read_csv(f, sep='\t') for f in files_mutAnno if os.path.exists(f)]
+        # Preserve leading zeros and literal IDs such as NA without changing
+        # numeric or missing-value handling in the annotation columns.
+        annotation_parts = [
+            pd.read_csv(f, sep='\t', converters={
+                'protein_id': str, 'protein_id_fasta': str,
+            })
+            for f in files_mutAnno if os.path.exists(f)
+        ]
         if annotation_parts:
             df_mutAnno = pd.concat(annotation_parts, ignore_index=True)
         else:

@@ -129,6 +129,27 @@ def test_empty_translation_outputs_keep_headers_and_empty_fasta(tmp_path):
     assert (tmp_path / 'empty.mutated_protein.fa').read_text() == ''
 
 
+@pytest.mark.parametrize('protein_id', ['P', 'P__1'])
+def test_standard_output_ids_match_fasta_ids_exactly(tmp_path, protein_id):
+    outprefix = str(tmp_path / 'changed')
+    results = pd.DataFrame(
+        [{
+            'protein_id_fasta': protein_id,
+            'protein_description': protein_id + ' description',
+            'AA_seq': 'MAK',
+            'new_AA': 'MVK',
+        }],
+        index=pd.Index(['canonical'], name='protein_id'),
+    )
+
+    perChrom.save_mutation_and_proteins(results, outprefix)
+
+    table = pd.read_csv(outprefix + '.aa_mutations.csv', sep='\t')
+    assert table['protein_id_fasta'].tolist() == [protein_id]
+    fasta_header = (tmp_path / 'changed.mutated_protein.fa').read_text().splitlines()[0]
+    assert fasta_header.split()[0] == '>' + protein_id
+
+
 def test_sqlite_save_handles_missing_new_sequence_column(tmp_path):
     outprefix = str(tmp_path / 'empty_sqlite')
 

@@ -1,4 +1,5 @@
 import csv
+import gzip
 
 import pytest
 
@@ -112,6 +113,37 @@ def test_manifest_parser_uses_same_haploid_padding(tmp_path):
     rows = list(csv.reader(open(tmp_path / 'manifest_out.tsv'), delimiter='\t'))
     assert rows[0] == ['chr', 'pos', 'ref', 'alt', 'cohortA__1', 'cohortA__2']
     assert rows[1] == ['1', '10', 'A', 'G', '1', '0']
+
+
+def test_plain_and_gzipped_manifests_produce_identical_output(tmp_path):
+    vcf = write_vcf(
+        tmp_path / 'sample.vcf',
+        ['source_sample'],
+        [
+            ['1', '10', '.', 'A', 'G', '.', 'PASS', '.', 'GT', '0/1'],
+            ['2', '20', '.', 'C', 'T', '.', 'PASS', '.', 'GT', '1/1'],
+        ],
+    )
+    manifest_text = (
+        'filepath\tsample\tname_use\n'
+        f'{vcf}\tsource_sample\tcohortA\n'
+    )
+    plain_manifest = tmp_path / 'manifest.tsv'
+    plain_manifest.write_text(manifest_text)
+    gzip_manifest = tmp_path / 'manifest.tsv.gz'
+    with gzip.open(gzip_manifest, 'wt') as handle:
+        handle.write(manifest_text)
+
+    convertVCFManifest2MutationComplex(
+        str(plain_manifest), str(tmp_path / 'plain_out')
+    )
+    convertVCFManifest2MutationComplex(
+        str(gzip_manifest), str(tmp_path / 'gzip_out')
+    )
+
+    assert (tmp_path / 'gzip_out.tsv').read_bytes() == (
+        tmp_path / 'plain_out.tsv'
+    ).read_bytes()
 
 
 def test_legacy_parser_respects_sample_and_genotype_policy(tmp_path):
