@@ -23,6 +23,17 @@ _MUTATION_RECORD_CACHE = {}
 _CODON_TRANSLATE_CACHE = {}
 
 
+def reset_translation_caches():
+    """Clear process-local caches that depend on transcript or variant inputs."""
+    _CDSPLUS_CACHE.clear()
+    _CDSPLUS_KEY_INDEX_CACHE.clear()
+    _CDSPLUS_DIRECT_CACHE.clear()
+    _MUT_HELPER_CACHE.clear()
+    _MUTATION_RECORD_CACHE.clear()
+    _CODON_TRANSLATE_CACHE.clear()
+    _PRINTED_WARNINGS.clear()
+
+
 def _print_once_per_process(key, *args):
     if key in _PRINTED_WARNINGS:
         return
@@ -236,20 +247,54 @@ def _get_mutation_records(df_mutations, mutation, strand):
     alt = r['alt']
     variant_id = '{}-{}-{}-{}'.format(chromosome, pos, ref, alt)
 
+    ref = str(ref).upper()
+    alt = str(alt).upper()
+    oriented_ref = ref if strand == '+' else f_rc(ref)
+    oriented_alt = alt if strand == '+' else f_rc(alt)
+
+    # Trim the shared ends in transcript orientation. The remaining edit can
+    # be represented on the existing per-base CDS rows: one replacement row,
+    # followed by removed reference rows, or an insertion attached to a base.
+    prefix = 0
+    max_prefix = min(len(oriented_ref), len(oriented_alt))
+    while prefix < max_prefix and oriented_ref[prefix] == oriented_alt[prefix]:
+        prefix += 1
+    suffix = 0
+    max_suffix = min(len(oriented_ref) - prefix, len(oriented_alt) - prefix)
+    while suffix < max_suffix and oriented_ref[-(suffix + 1)] == oriented_alt[-(suffix + 1)]:
+        suffix += 1
+
+    ref_stop = len(oriented_ref) - suffix
+    alt_stop = len(oriented_alt) - suffix
+    changed_ref = oriented_ref[prefix:ref_stop]
+    changed_alt = oriented_alt[prefix:alt_stop]
+
     records = []
-    if len(ref) == 1:
-        if strand == '+':
-            records.append([chromosome, pos, ref, alt, variant_id])
-        else:
-            records.append([chromosome, pos, f_rc(ref), f_rc(alt), variant_id])
-    else:
-        for n in range(1, len(ref)):
-            p = pos + n
-            ref_base = ref[n]
-            if strand == '+':
-                records.append([chromosome, p, ref_base, '', variant_id])
-            else:
-                records.append([chromosome, p, f_rc(ref_base), '', variant_id])
+    if len(changed_ref) == len(changed_alt):
+        for offset, (ref_base, alt_base) in enumerate(zip(changed_ref, changed_alt)):
+            oriented_offset = prefix + offset
+            genomic_pos = pos + oriented_offset if strand == '+' else pos + len(ref) - 1 - oriented_offset
+            records.append([chromosome, genomic_pos, ref_base, alt_base, variant_id])
+    elif changed_ref:
+        for offset, ref_base in enumerate(changed_ref):
+            oriented_offset = prefix + offset
+            genomic_pos = pos + oriented_offset if strand == '+' else pos + len(ref) - 1 - oriented_offset
+            records.append([
+                chromosome,
+                genomic_pos,
+                ref_base,
+                changed_alt if offset == 0 else '',
+                variant_id,
+            ])
+    elif changed_alt:
+        # Insert after the common prefix in transcript direction. Attach the
+        # inserted sequence to its adjacent reference row so downstream codon
+        # assembly sees it in the correct order, including on the minus strand.
+        host_offset = prefix - 1 if prefix > 0 else 0
+        genomic_pos = pos + host_offset if strand == '+' else pos + len(ref) - 1 - host_offset
+        host_ref = oriented_ref[host_offset]
+        host_alt = host_ref + changed_alt if prefix > 0 else changed_alt + host_ref
+        records.append([chromosome, genomic_pos, host_ref, host_alt, variant_id])
 
     _MUTATION_RECORD_CACHE[cache_key] = records
     return records
@@ -735,7 +780,61 @@ def checkIfAAtranslatedFromGenome(r):
     return False
 
 
-def getMut_helper(mutations, strand, df_mutations):
+def _get_validated_mutation_records(df_mutations, mutations, strand, df_CDSplus):
+    """Return transcript-oriented edits after validating the full reference allele."""
+    positions_to_indices = {}
+    for idx, (position, base) in enumerate(zip(df_CDSplus['locs'], df_CDSplus['bases'])):
+        positions_to_indices[int(position)] = (idx, str(base).upper())
+
+    records = []
+    seen_variant_positions = {}
+    for mutation in mutations:
+        row = df_mutations.loc[mutation]
+        chromosome = row['chr']
+        pos = int(row['pos'])
+        ref = str(row['ref']).upper()
+        variant_id = '{}-{}-{}-{}'.format(chromosome, pos, ref, str(row['alt']).upper())
+        genomic_positions = list(range(pos, pos + len(ref)))
+        mapped = [positions_to_indices.get(position) for position in genomic_positions]
+
+        # Variants wholly outside the translated CDS (for example, bases
+        # trimmed by the annotated frame) cannot affect the protein. A partial
+        # mapping is unsafe and must not be applied to only part of an allele.
+        if all(item is None for item in mapped):
+            continue
+        if any(item is None for item in mapped):
+            raise ValueError(
+                f'variant {variant_id} is only partly represented in transcript {df_CDSplus.attrs.get("transcript_id", "")}'
+            )
+
+        indices = [item[0] for item in mapped]
+        expected_indices = list(range(indices[0], indices[0] + len(indices))) if strand == '+' else list(range(indices[0], indices[0] - len(indices), -1))
+        if indices != expected_indices:
+            raise ValueError(f'variant {variant_id} crosses a transcript segment boundary')
+
+        oriented_ref = ref if strand == '+' else f_rc(ref)
+        transcript_ref = ''.join(positions_to_indices[position][1] for position in (genomic_positions if strand == '+' else reversed(genomic_positions)))
+        if transcript_ref != oriented_ref:
+            transcript_id = df_CDSplus.attrs.get('transcript_id', 'unknown')
+            raise ValueError(
+                f'reference mismatch for variant {variant_id} in transcript {transcript_id}: '
+                f'expected {transcript_ref}, observed {oriented_ref}'
+            )
+
+        for other_variant, other_positions in seen_variant_positions.items():
+            overlap = set(genomic_positions).intersection(other_positions)
+            if overlap:
+                raise ValueError(
+                    f'overlapping variants {other_variant} and {variant_id} in transcript '
+                    f'{df_CDSplus.attrs.get("transcript_id", "unknown")}'
+                )
+        seen_variant_positions[variant_id] = genomic_positions
+        records.extend(_get_mutation_records(df_mutations, mutation, strand))
+
+    return records
+
+
+def getMut_helper(mutations, strand, df_mutations, df_CDSplus=None):
     '''
     given index of mutations in df_mutations,
     return a dataframe, with chr, pos, and mutations
@@ -743,16 +842,19 @@ def getMut_helper(mutations, strand, df_mutations):
     for deletion, change so that ref include only one AA, alt change to empty
     '''
     cache_key = (id(df_mutations), tuple(mutations), strand)
-    if cache_key in _MUT_HELPER_CACHE:
+    if df_CDSplus is None and cache_key in _MUT_HELPER_CACHE:
         return _MUT_HELPER_CACHE[cache_key]
 
-    results = []
-    for mutation in mutations:
-        results.extend(_get_mutation_records(df_mutations, mutation, strand))
+    if df_CDSplus is None:
+        results = []
+        for mutation in mutations:
+            results.extend(_get_mutation_records(df_mutations, mutation, strand))
+    else:
+        results = _get_validated_mutation_records(df_mutations, mutations, strand, df_CDSplus)
     
-    tdf_m = pd.DataFrame(results)
-    tdf_m.columns = ['chr','pos','ref','alt','variant_id']
-    _MUT_HELPER_CACHE[cache_key] = tdf_m
+    tdf_m = pd.DataFrame(results, columns=['chr', 'pos', 'ref', 'alt', 'variant_id'])
+    if df_CDSplus is None:
+        _MUT_HELPER_CACHE[cache_key] = tdf_m
     return tdf_m
 
 
@@ -824,9 +926,9 @@ def translateCDSplusWithMut(r, df_mutations):
     frame = int(r['frame'])
     strand = r['strand']
     mutations = r['mutations']
-    tdf_m = getMut_helper(mutations, strand, df_mutations)
-    
     df_CDSplus, AA_seq, AA_ori, AA_translate, nonStandardStopCodon = _get_cached_CDSplus_for_transcript_id(r)
+    df_CDSplus.attrs['transcript_id'] = transcript_id
+    tdf_m = getMut_helper(mutations, strand, df_mutations, df_CDSplus)
     tdc_result['nonStandardStopCodon'] = nonStandardStopCodon
     AA_len = len(AA_seq)
     
@@ -1025,8 +1127,7 @@ def translateCDSplusWithMut2(r, df_mutations):
     try:
         return translateCDSplusWithMut(r, df_mutations)
     except Exception as e:
-        print(f'{transcript_id} cannot be processed properly, please check Error: {e}')
-        return {}
+        raise RuntimeError(f'transcript {transcript_id} cannot be processed: {e}') from e
 
 
 def save_mutation_and_proteins(df_transcript3, outprefix):
@@ -1036,15 +1137,40 @@ def save_mutation_and_proteins(df_transcript3, outprefix):
     # save mutation annotation
     columns_keep = ['protein_id_fasta', 'seqname', 'strand','frameChange','stopGain', 'AA_stopGain', 'stopLoss', 'stopLoss_pos', 'nonStandardStopCodon', 'n_variant_AA', 'n_deletion_AA', 'n_insertion_AA', 'variant_AA', 'insertion_AA', 'deletion_AA', 'len_ref_AA', 'len_alt_AA']
     columns_keep = [e for e in columns_keep if e in df_transcript3.columns]
-    if df_transcript3.shape[0] == 0:
+    has_sequence_columns = {'AA_seq', 'new_AA'}.issubset(df_transcript3.columns)
+    if df_transcript3.shape[0] == 0 or not has_sequence_columns:
+        df_sum_mutations = pd.DataFrame()
+    else:
+        df_sum_mutations = df_transcript3[
+            (df_transcript3['AA_seq'] != df_transcript3['new_AA'])
+            & (pd.notnull(df_transcript3['new_AA']))
+        ][columns_keep]
+
+    outfilename = outprefix + '.aa_mutations.csv'
+    output_dir = os.path.dirname(outfilename)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    if df_sum_mutations.empty:
+        output_columns = [
+            'protein_id', 'protein_id_fasta', 'seqname', 'strand', 'frameChange',
+            'stopGain', 'AA_stopGain', 'stopLoss', 'stopLoss_pos',
+            'nonStandardStopCodon', 'n_variant_AA', 'n_deletion_AA',
+            'n_insertion_AA', 'variant_AA', 'insertion_AA', 'deletion_AA',
+            'len_ref_AA', 'len_alt_AA',
+        ]
+        pd.DataFrame(columns=output_columns).to_csv(outfilename, sep='\t', index=None)
+        open(outprefix + '.mutated_protein.fa', 'w').close()
         print('no protein with AA change')
-        return pd.DataFrame()
-    df_sum_mutations = df_transcript3[(df_transcript3['AA_seq'] != df_transcript3['new_AA']) & (pd.notnull(df_transcript3['new_AA']))][columns_keep]
-    
-    outfilename = outprefix +'.aa_mutations.csv'
-    if not os.path.exists(os.path.dirname(outfilename)):
-        os.makedirs(os.path.dirname(outfilename))
-    df_sum_mutations.to_csv(outfilename, sep='\t',index=None)
+        return pd.DataFrame(columns=output_columns)
+
+    df_sum_mutations = df_sum_mutations.reset_index()
+    df_sum_mutations['protein_id_fasta_nth'] = df_sum_mutations.groupby('protein_id_fasta').cumcount() + 1
+    df_sum_mutations['protein_id_fasta'] = df_sum_mutations.apply(
+        lambda row: '{}__{}'.format(row['protein_id_fasta'], row['protein_id_fasta_nth']), axis=1
+    )
+    df_sum_mutations[
+        [col for col in df_sum_mutations.columns if col not in ['new_AA', 'AA_seq', 'protein_id_fasta_nth']]
+    ].to_csv(outfilename, sep='\t', index=None)
     print('number of proteins with AA change:', df_sum_mutations.shape[0])
     
     # save proteins
@@ -1097,6 +1223,7 @@ class PerChrom(object):
     def run_perChrom(self, save_results = True):
         '''run perChrom
         '''
+        reset_translation_caches()
         cpu_counts = self.threads
         df_transcript3 = self.df_transcript2
         datatype = self.datatype
@@ -1106,6 +1233,8 @@ class PerChrom(object):
         
         if df_transcript3.shape[0] == 0:
             print('No protein sequences to change for chromosome', chromosome)
+            if save_results:
+                return save_mutation_and_proteins(df_transcript3, outprefix)
             return df_transcript3
 
         pool = Pool(cpu_counts)

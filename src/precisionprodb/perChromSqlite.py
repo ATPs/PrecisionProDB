@@ -213,19 +213,47 @@ def save_mutation_and_proteins(df_transcript3, outprefix):
     # save mutation annotation
     columns_keep = ['protein_id_fasta', 'seqname', 'strand','frameChange','stopGain', 'AA_stopGain', 'stopLoss', 'stopLoss_pos', 'nonStandardStopCodon', 'n_variant_AA', 'n_deletion_AA', 'n_insertion_AA', 'variant_AA', 'insertion_AA', 'deletion_AA', 'len_ref_AA', 'len_alt_AA','individual','new_AA','AA_seq']
     columns_keep = [e for e in columns_keep if e in df_transcript3.columns]
-    if df_transcript3.shape[0] == 0:
+    has_sequence_columns = {'AA_seq', 'new_AA'}.issubset(df_transcript3.columns)
+    if df_transcript3.shape[0] == 0 or not has_sequence_columns:
+        df_sum_mutations = pd.DataFrame()
+    else:
+        df_sum_mutations = df_transcript3[
+            (df_transcript3['AA_seq'] != df_transcript3['new_AA'])
+            & (pd.notnull(df_transcript3['new_AA']))
+        ][columns_keep]
+
+    outfilename = outprefix + '.aa_mutations.csv'
+    output_dir = os.path.dirname(outfilename)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+    if df_sum_mutations.empty:
+        output_columns = [
+            'protein_id', 'protein_id_fasta', 'seqname', 'strand', 'frameChange',
+            'stopGain', 'AA_stopGain', 'stopLoss', 'stopLoss_pos',
+            'nonStandardStopCodon', 'n_variant_AA', 'n_deletion_AA',
+            'n_insertion_AA', 'variant_AA', 'insertion_AA', 'deletion_AA',
+            'len_ref_AA', 'len_alt_AA',
+        ]
+        if 'individual' in df_transcript3.columns:
+            output_columns.append('individual')
+        pd.DataFrame(columns=output_columns).to_csv(outfilename, sep='\t', index=None)
+        open(outprefix + '.mutated_protein.fa', 'w').close()
         print('no protein with AA change')
-        return pd.DataFrame()
-    df_sum_mutations = df_transcript3[(df_transcript3['AA_seq'] != df_transcript3['new_AA']) & (pd.notnull(df_transcript3['new_AA']))][columns_keep]
-    
+        return pd.DataFrame(columns=output_columns)
+
     df_sum_mutations = df_sum_mutations.reset_index()
-    df_sum_mutations = df_sum_mutations.groupby([i for i in df_sum_mutations.columns if i != 'individual'] ,dropna=False)['individual'].apply(lambda x:','.join(x)).reset_index()
-    df_sum_mutations['protein_id_fasta_nth'] = df_sum_mutations.groupby('protein_id_fasta').cumcount()+1
-    df_sum_mutations['protein_id_fasta'] = df_sum_mutations.apply(lambda x: '{}__{}'.format(x['protein_id_fasta'], x['protein_id_fasta_nth']), axis=1)
-    outfilename = outprefix +'.aa_mutations.csv'
-    if not os.path.exists(os.path.dirname(outfilename)):
-        os.makedirs(os.path.dirname(outfilename))
-    df_sum_mutations[[i for i in df_sum_mutations.columns if i not in ['new_AA','AA_seq', 'protein_id_fasta_nth']]].to_csv(outfilename, sep='\t',index=None)
+    if 'individual' in df_sum_mutations.columns:
+        group_columns = [col for col in df_sum_mutations.columns if col != 'individual']
+        df_sum_mutations = df_sum_mutations.groupby(group_columns, dropna=False)['individual'].apply(
+            lambda values: ','.join(values)
+        ).reset_index()
+    df_sum_mutations['protein_id_fasta_nth'] = df_sum_mutations.groupby('protein_id_fasta').cumcount() + 1
+    df_sum_mutations['protein_id_fasta'] = df_sum_mutations.apply(
+        lambda row: '{}__{}'.format(row['protein_id_fasta'], row['protein_id_fasta_nth']), axis=1
+    )
+    df_sum_mutations[
+        [col for col in df_sum_mutations.columns if col not in ['new_AA', 'AA_seq', 'protein_id_fasta_nth']]
+    ].to_csv(outfilename, sep='\t', index=None)
     print('{} proteins with AA change and generated {} mutated proteins'.format(df_sum_mutations['protein_id'].nunique(), df_sum_mutations['protein_id_fasta'].nunique()))
     
     
@@ -358,6 +386,7 @@ class PerChrom_sqlite(object):
     def run_perChrom(self, save_results = True):
         '''run perChrom
         '''
+        perChrom.reset_translation_caches()
         cpu_counts = self.threads
         datatype = self.datatype
         outprefix = self.outprefix
@@ -377,6 +406,11 @@ class PerChrom_sqlite(object):
         df_transcript2 = pd.read_sql_query(query, self.con)        # assign mutations to each transcript. 
         if df_transcript2.shape[0] == 0:
             print('No protein sequences to change for chromosome', chromosome)
+            if save_results:
+                empty_results = df_transcript2.copy()
+                if individual:
+                    empty_results['individual'] = pd.Series(dtype=object)
+                return save_mutation_and_proteins(empty_results, outprefix)
             return df_transcript2
         # update df_transcript2
         df_transcript2 = df_transcript2.set_index('protein_id')
@@ -405,6 +439,11 @@ class PerChrom_sqlite(object):
     
         if df_transcript3.shape[0] == 0:
             print('No protein sequences to change for chromosome', chromosome)
+            if save_results:
+                empty_results = df_transcript3.copy()
+                if individual:
+                    empty_results['individual'] = pd.Series(dtype=object)
+                return save_mutation_and_proteins(empty_results, outprefix)
             return df_transcript3
 
         if cpu_counts > 1:

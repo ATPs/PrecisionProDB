@@ -154,7 +154,9 @@ Note:
 
 ```bash
 python Path_of_PrecisionProDB/src/precisionprodb/PrecisionProDB_test.py -h
+python Path_of_PrecisionProDB/src/precisionprodb/PrecisionProDB_test.py -s Path_of_PrecisionProDB -o /path/to/fresh_test_output
 ```
+Use a fresh output directory for the full example matrix. The driver exits nonzero if any command or output validation fails.
 [the output of running the test files were shown in folder test_output](/test_output/)
 
 # Citing PrecisionProDB
@@ -187,6 +189,8 @@ If there are multiple samples in the VCF file, the `-s` option should be used to
 python Path_of_PrecisionProDB/src/precisionprodb/PrecisionProDB.py -m Name_of_variant_file -D GENCODE -o Prefix_of_output -s Sample_name
 ```
 
+The requested sample must occur in the VCF header; otherwise the run stops with an error. `--sample ALL_VARIANTS` ignores genotype calls and includes all retained ALT alleles. For genotype-based runs, a missing allele is treated as the reference allele (`1/.` becomes `1/0`); haploid `1` is represented as `1/0` in the two-column mutation output. Calls with more than two alleles stop with an error. Phased `|` calls retain their two allele slots; unphased `/` calls use the VCF's listed allele order and do not infer phase across records. For a protein with multiple unphased variants, review the resulting haplotype interpretation before using its sequence as a sample-specific proteoform.
+
 ### VCF manifest for one-VCF-per-sample cohorts
 
 For cohort data stored as one VCF file per sample, `--mutations` (`-m`) can be a tab-separated manifest file. The manifest must have a header, and the first column must be named `filepath`.
@@ -201,6 +205,12 @@ filepath	sample	name_use
 - `sample` is optional. If omitted, PrecisionProDB uses the first sample column in that VCF.
 - `name_use` is optional. If omitted, PrecisionProDB uses the selected sample name. If output names are duplicated, it prints a warning and uses VCF filename-derived names for the duplicated entries.
 - `-t/--threads` parses manifest rows in parallel, with one VCF file per worker.
+
+### Reusing an output prefix
+
+PrecisionProDB writes a `<prefix>.run.json` receipt after a complete run. Repeating the same command with unchanged inputs and settings reuses the validated outputs. If an input, an output, or a retained intermediate file has changed, the run stops rather than mixing files from different runs. Use a fresh prefix, or pass `--force` to rebuild this prefix. `--force` is long-only because `-f` selects the GTF file. An external SQLite database supplied with `-S` is preserved; a database built for this prefix is rebuilt. With `--keep_all --force`, previous generated files are moved under `<prefix>.archive/` before rebuilding.
+
+The standalone `vcf2mutation` converter also checks its output receipt before reusing a `.done` marker. Its `--force` option rebuilds a stale conversion. The standalone `buildSqlite` command refuses to replace an existing database or reuse stale split files unless `--force` is given; it builds a replacement database before installing it.
 
 ```bash
 python Path_of_PrecisionProDB/src/precisionprodb/PrecisionProDB.py -m Manifest_file.tsv -D GENCODE -o Prefix_of_output -t 20

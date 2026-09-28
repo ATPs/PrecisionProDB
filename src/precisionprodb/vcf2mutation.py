@@ -9,8 +9,10 @@ import subprocess
 
 if __package__:
     from .args import add_argument_set
+    from .runstate import StageCache
 else:
     from args import add_argument_set
+    from runstate import StageCache
 
 try:
     import tqdm
@@ -186,6 +188,118 @@ def info_field_passes_threshold(info_str, field, threshold):
             continue
     return False
 
+
+def _resolve_sample_selection(columns, individual_input, file_vcf):
+    """Return selected sample names and VCF column indices.
+
+    Explicit sample requests are all-or-nothing: a typo must not silently turn
+    a sample-specific conversion into an all-variants conversion.
+    """
+    all_samples = columns[9:] if len(columns) > 9 else []
+    if individual_input == 'ALL_VARIANTS':
+        individuals = []
+    elif individual_input == 'ALL_SAMPLES':
+        individuals = all_samples
+    elif individual_input is None:
+        if all_samples:
+            individuals = [all_samples[0]]
+            print(f"No sample specified, using first sample: {individuals[0]}")
+        else:
+            individuals = []
+            print(f"No sample columns found in {file_vcf}; processing all variants.")
+    else:
+        if isinstance(individual_input, str):
+            requested = [sample.strip() for sample in individual_input.split(',')]
+        else:
+            requested = [str(sample).strip() for sample in individual_input]
+        requested = list(dict.fromkeys(sample for sample in requested if sample))
+        if not requested:
+            raise ValueError(f"No sample names were requested for {file_vcf}")
+        missing = [sample for sample in requested if sample not in all_samples]
+        if missing:
+            raise ValueError(
+                f"Requested sample(s) not found in {file_vcf}: {', '.join(missing)}"
+            )
+        individuals = requested
+
+    individual_col = [9 + all_samples.index(sample) for sample in individuals]
+    return individuals, individual_col
+
+
+def _decode_genotype(sample_value, format_field, n_alternatives, context):
+    """Decode one VCF sample field as two allele indices.
+
+    Missing alleles are treated as reference, and haploid calls receive a
+    reference allele in the second slot to preserve the mutation TSV schema.
+    """
+    format_keys = format_field.split(':') if format_field else []
+    if 'GT' not in format_keys:
+        raise ValueError(f"GT field is missing for {context} (FORMAT={format_field!r})")
+    gt_index = format_keys.index('GT')
+    sample_fields = sample_value.split(':')
+    if gt_index >= len(sample_fields):
+        raise ValueError(f"GT value is missing for {context}")
+    genotype = sample_fields[gt_index]
+    if genotype == '':
+        raise ValueError(f"Empty GT value for {context}")
+
+    if '|' in genotype and '/' in genotype:
+        raise ValueError(f"Mixed phased and unphased separators in GT {genotype!r} for {context}")
+    if '|' in genotype:
+        alleles = genotype.split('|')
+    elif '/' in genotype:
+        alleles = genotype.split('/')
+    else:
+        alleles = [genotype]
+
+    if len(alleles) > 2:
+        raise ValueError(f"More than two alleles in GT {genotype!r} for {context}")
+    if len(alleles) == 1:
+        alleles.append('0')
+
+    decoded = []
+    for allele in alleles:
+        if allele == '.':
+            decoded.append(0)
+            continue
+        if not allele.isdigit():
+            raise ValueError(f"Invalid allele {allele!r} in GT {genotype!r} for {context}")
+        allele_index = int(allele)
+        if allele_index > n_alternatives:
+            raise ValueError(
+                f"GT allele index {allele_index} exceeds {n_alternatives} ALT allele(s) for {context}"
+            )
+        decoded.append(allele_index)
+    return decoded
+
+
+def _decode_record_genotypes(es, individual_col, file_vcf=None, individual_names=None):
+    """Decode selected genotypes from split VCF fields using one shared rule."""
+    chromosome = es[0] if es else '<unknown chromosome>'
+    position = es[1] if len(es) > 1 else '<unknown position>'
+    context_base = f"{file_vcf or '<VCF>'}:{chromosome}:{position}"
+    alternatives = es[4].split(',') if len(es) > 4 else []
+    format_field = es[8] if len(es) > 8 else ''
+    genotypes = []
+    for selected_index, column_index in enumerate(individual_col):
+        if column_index >= len(es):
+            sample_label = (
+                individual_names[selected_index]
+                if individual_names and selected_index < len(individual_names)
+                else f'column {column_index + 1}'
+            )
+            raise ValueError(f"Missing sample field for {sample_label} at {context_base}")
+        sample_label = (
+            individual_names[selected_index]
+            if individual_names and selected_index < len(individual_names)
+            else f'column {column_index + 1}'
+        )
+        context = f"sample {sample_label} at {context_base}"
+        genotypes.append(
+            _decode_genotype(es[column_index], format_field, len(alternatives), context)
+        )
+    return genotypes
+
 def getMutationsFromVCF(file_vcf, outprefix = None, individual=None, filter_PASS = True, chromosome_only = True):
     '''return two dataframe of mutations.
     if outprefix is not None, write the two dataframe to outprfex +'_1/2.tsv' two files as mutation file
@@ -204,70 +318,50 @@ def getMutationsFromVCF(file_vcf, outprefix = None, individual=None, filter_PASS
             print(file_vcf, 'not found.')
             return None
     
-    ls_keep = []
-    write_header = True
-    
+    ls_keep = ['chr\tpos\tref\talt1\talt2\n']
+
     for file_vcf in files_vcf:
-        fo = openFile(file_vcf)
-        for line in fo:
-            if not line.startswith('##'):
+        with openFile(file_vcf) as fo:
+            header_line = None
+            for line in fo:
+                if line.startswith('##'):
+                    continue
+                header_line = line
                 break
-        
-        columns = line.strip().split('\t')
-        # get the column to keep in the 
-        if individual is None:
-            indi_col = 9
-            print('individual is None, select the first sample in vcf file, which is', columns[9])
-        else:
-            if individual in columns:
-                indi_col = columns.index(individual)
-                print('individual is provided as', individual, 'which exists in the vcf file')
-            else:
-                print(individual, 'does not exist in the vcf file')
-                exit(-1)
-        
-        # chromosomes
-        chromosomes = [str(i) for i in range(1,23)] + list('XY')
-        chromosomes = ['chr' + i for i in chromosomes] + chromosomes
-        chromosomes = set(chromosomes)
-        
-        if write_header:
-            ls_keep.append('chr\tpos\tref\talt1\talt2\n')
-            write_header = False
-        
-        for line in fo:
-            es = line.strip().split('\t')
-            chromosome, position, reference, alternatives, filter, genotype = es[0], es[1], es[3], es[4], es[6], es[indi_col]
+            if header_line is None or not header_line.startswith('#CHROM'):
+                raise ValueError(f"#CHROM header line not found in {file_vcf}")
 
-            if chromosome_only:
-                # skip if not chromosome but some scaffolds
-                if chromosome not in chromosomes:
+            columns = header_line.rstrip('\n\r').split('\t')
+            selected, individual_col = _resolve_sample_selection(columns, individual, file_vcf)
+            if len(selected) != 1:
+                raise ValueError(
+                    "legacy VCF conversion requires exactly one sample; use "
+                    "convertVCF2MutationComplex for multiple samples or ALL_VARIANTS"
+                )
+            print('using sample', selected[0], 'from', file_vcf)
+
+            for line in fo:
+                if not line.strip():
                     continue
-            
-            if filter_PASS:
-                # skip if not "PASS"
-                if filter != "PASS":
+                es = line.rstrip('\n\r').split('\t')
+                if len(es) < 8:
+                    raise ValueError(f"Malformed VCF record with fewer than 8 columns in {file_vcf}: {line.rstrip()}")
+                chromosome, position, reference, alternatives, filter_value = es[0], es[1], es[3], es[4], es[6]
+
+                if chromosome_only and chromosome not in CHROMOSOMES:
+                    continue
+                if filter_PASS and filter_value != 'PASS':
                     continue
 
-            # skip if no mutation
-            if genotype.startswith('0|0') or genotype.startswith('0/0'):
-                continue
+                genotype = _decode_record_genotypes(es, individual_col, file_vcf, selected)[0]
+                if all(allele == 0 for allele in genotype):
+                    continue
 
-            alternatives = alternatives.split(',')
-            genotype = genotype.split(':')[0]
-            if genotype == '.':
-                continue
-            
-            if '|' in genotype:
-                GTs = genotype.split('|')
-            elif '/' in genotype:
-                GTs = genotype.split('/')
-            else:
-                GTs = [genotype, '.']# some GTs like "GT:AD:DP:GQ:PL  0:3,0:3:99:0,104"
-            GTs = [int(e) if e != '.' else 0 for e in GTs]
-            alternatives = [reference] + alternatives
-            alternative1, alternative2 = alternatives[GTs[0]], alternatives[GTs[1]]
-            ls_keep.append('{}\t{}\t{}\t{}\t{}\n'.format(chromosome, position, reference, alternative1, alternative2))
+                alleles = [reference] + alternatives.split(',')
+                alternative1, alternative2 = alleles[genotype[0]], alleles[genotype[1]]
+                ls_keep.append(
+                    f'{chromosome}\t{position}\t{reference}\t{alternative1}\t{alternative2}\n'
+                )
     
     df = pd.read_csv(io.StringIO(''.join(ls_keep)), sep='\t',low_memory=False)
     print('before QC, sites with mutations:', df.shape[0],'of which, homozyous sites:', df[df['alt1'] == df['alt2']].shape[0])
@@ -358,7 +452,8 @@ def processOneLineOfVCF(line,
                         info_field=None, 
                         info_field_thres=None, 
                         chromosomes=CHROMOSOMES,
-                        file_vcf=None
+                        file_vcf=None,
+                        individual_names=None,
                         ):
     '''Process one line of VCF file and return formatted mutation information
     
@@ -375,13 +470,10 @@ def processOneLineOfVCF(line,
     Returns:
         str: Formatted mutation line(s) or empty string if variant should be skipped
     '''
-    # print(line)
-    es = line.strip().split('\t')
-    chromosome, position, reference, alternatives, FILTER = es[0], es[1], es[3], es[4], es[6]
-    genotypes = [es[i] for i in individual_col]
-
+    es = line.rstrip('\n\r').split('\t')
     if len(es) < 8:
-        print(f'Warning: Malformed VCF line (too few columns) in {file_vcf}: {line}')
+        raise ValueError(f'Malformed VCF line with fewer than 8 columns in {file_vcf}: {line.rstrip()}')
+    chromosome, position, reference, alternatives, FILTER = es[0], es[1], es[3], es[4], es[6]
 
     if chromosome_only:
         # skip if not chromosome but some scaffolds
@@ -402,21 +494,10 @@ def processOneLineOfVCF(line,
                 print('waring! INFO field', info_field, 'not found in', file_vcf, line)
             elif not passes_threshold:
                 return ''
-    # skip if no mutation
-    if all([genotype.startswith('0|0') or genotype.startswith('0/0') or genotype.startswith('.|.') or genotype.startswith('./.') for genotype in genotypes]) and len(genotypes) >= 1:
-        return ''
-
     alternatives = alternatives.split(',')
-    genotypes = [genotype.split(':')[0] for genotype in genotypes]
-    # if '.' in genotypes, change to './.'
-    genotypes = ['./.' if genotype == '.' else genotype for genotype in genotypes]
-    
-    if all(['.' in genotype for genotype in genotypes]) and len(genotypes) >= 1:
-        print('line with too many missing genotypes skipped')
+    GTs = _decode_record_genotypes(es, individual_col, file_vcf, individual_names)
+    if GTs and all(all(allele == 0 for allele in genotype) for genotype in GTs):
         return ''
-    
-    GTs = [genotype.split('|') if '|' in genotype else genotype.split('/') for genotype in genotypes]
-    GTs = [[int(e) if e != '.' else 0 for e in i] for i in GTs]
     
     alleles = [reference] + alternatives
     ls_new_line = []
@@ -446,27 +527,30 @@ _WORKER_FILTER_PASS = True
 _WORKER_INFO_FIELD = None
 _WORKER_INFO_FIELD_THRES = None
 _WORKER_FILE_VCF = None
+_WORKER_INDIVIDUAL_NAMES = None
 
 
-def init_vcf_worker(individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, file_vcf):
+def init_vcf_worker(individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, file_vcf, individual_names=None):
     global _WORKER_INDIVIDUAL_COL
     global _WORKER_CHROMOSOME_ONLY
     global _WORKER_FILTER_PASS
     global _WORKER_INFO_FIELD
     global _WORKER_INFO_FIELD_THRES
     global _WORKER_FILE_VCF
+    global _WORKER_INDIVIDUAL_NAMES
     _WORKER_INDIVIDUAL_COL = individual_col
     _WORKER_CHROMOSOME_ONLY = chromosome_only
     _WORKER_FILTER_PASS = filter_PASS
     _WORKER_INFO_FIELD = info_field
     _WORKER_INFO_FIELD_THRES = info_field_thres
     _WORKER_FILE_VCF = file_vcf
+    _WORKER_INDIVIDUAL_NAMES = individual_names
 
 
 def processOneLineOfVCFFast(line):
     es = line.rstrip('\n').split('\t')
     if len(es) < 8:
-        return processOneLineOfVCF(line, _WORKER_INDIVIDUAL_COL, _WORKER_CHROMOSOME_ONLY, _WORKER_FILTER_PASS, _WORKER_INFO_FIELD, _WORKER_INFO_FIELD_THRES, CHROMOSOMES, _WORKER_FILE_VCF)
+        return processOneLineOfVCF(line, _WORKER_INDIVIDUAL_COL, _WORKER_CHROMOSOME_ONLY, _WORKER_FILTER_PASS, _WORKER_INFO_FIELD, _WORKER_INFO_FIELD_THRES, CHROMOSOMES, _WORKER_FILE_VCF, _WORKER_INDIVIDUAL_NAMES)
 
     chromosome, position, reference, alternatives, FILTER = es[0], es[1], es[3], es[4], es[6]
 
@@ -482,42 +566,24 @@ def processOneLineOfVCFFast(line):
             return ''
 
     if ',' in alternatives:
-        return processOneLineOfVCF(line, _WORKER_INDIVIDUAL_COL, _WORKER_CHROMOSOME_ONLY, _WORKER_FILTER_PASS, _WORKER_INFO_FIELD, _WORKER_INFO_FIELD_THRES, CHROMOSOMES, _WORKER_FILE_VCF)
+        return processOneLineOfVCF(line, _WORKER_INDIVIDUAL_COL, _WORKER_CHROMOSOME_ONLY, _WORKER_FILTER_PASS, _WORKER_INFO_FIELD, _WORKER_INFO_FIELD_THRES, CHROMOSOMES, _WORKER_FILE_VCF, _WORKER_INDIVIDUAL_NAMES)
     alternative = alternatives
     if alternative == '*':
         return ''
     if len(reference) > 1 and len(alternative) > 1:
-        return processOneLineOfVCF(line, _WORKER_INDIVIDUAL_COL, _WORKER_CHROMOSOME_ONLY, _WORKER_FILTER_PASS, _WORKER_INFO_FIELD, _WORKER_INFO_FIELD_THRES, CHROMOSOMES, _WORKER_FILE_VCF)
+        return processOneLineOfVCF(line, _WORKER_INDIVIDUAL_COL, _WORKER_CHROMOSOME_ONLY, _WORKER_FILTER_PASS, _WORKER_INFO_FIELD, _WORKER_INFO_FIELD_THRES, CHROMOSOMES, _WORKER_FILE_VCF, _WORKER_INDIVIDUAL_NAMES)
 
     if not _WORKER_INDIVIDUAL_COL:
         return f'{chromosome}\t{position}\t{reference}\t{alternative}\n'
 
-    bits = []
-    has_alt = False
-    for col in _WORKER_INDIVIDUAL_COL:
-        genotype = es[col]
-        if len(genotype) < 3:
-            return processOneLineOfVCF(line, _WORKER_INDIVIDUAL_COL, _WORKER_CHROMOSOME_ONLY, _WORKER_FILTER_PASS, _WORKER_INFO_FIELD, _WORKER_INFO_FIELD_THRES, CHROMOSOMES, _WORKER_FILE_VCF)
-        a1, sep, a2 = genotype[0], genotype[1], genotype[2]
-        if sep not in ('|', '/'):
-            return processOneLineOfVCF(line, _WORKER_INDIVIDUAL_COL, _WORKER_CHROMOSOME_ONLY, _WORKER_FILTER_PASS, _WORKER_INFO_FIELD, _WORKER_INFO_FIELD_THRES, CHROMOSOMES, _WORKER_FILE_VCF)
-        if a1 == '1':
-            bits.append('1')
-            has_alt = True
-        elif a1 in ('0', '.'):
-            bits.append('0')
-        else:
-            return processOneLineOfVCF(line, _WORKER_INDIVIDUAL_COL, _WORKER_CHROMOSOME_ONLY, _WORKER_FILTER_PASS, _WORKER_INFO_FIELD, _WORKER_INFO_FIELD_THRES, CHROMOSOMES, _WORKER_FILE_VCF)
-        if a2 == '1':
-            bits.append('1')
-            has_alt = True
-        elif a2 in ('0', '.'):
-            bits.append('0')
-        else:
-            return processOneLineOfVCF(line, _WORKER_INDIVIDUAL_COL, _WORKER_CHROMOSOME_ONLY, _WORKER_FILTER_PASS, _WORKER_INFO_FIELD, _WORKER_INFO_FIELD_THRES, CHROMOSOMES, _WORKER_FILE_VCF)
-
-    if not has_alt:
+    genotypes = _decode_record_genotypes(es, _WORKER_INDIVIDUAL_COL, _WORKER_FILE_VCF, _WORKER_INDIVIDUAL_NAMES)
+    if all(all(allele == 0 for allele in genotype) for genotype in genotypes):
         return ''
+    bits = [
+        str(1 if allele == 1 else 0)
+        for genotype in genotypes
+        for allele in genotype
+    ]
     return f'{chromosome}\t{position}\t{reference}\t{alternative}\t' + '\t'.join(bits) + '\n'
 
 
@@ -536,15 +602,15 @@ def vcf_line_chunks(file_vcf, chunk_size=2000, threads=1):
         yield chunk
 
 
-def convertVCF2MutationComplexStream(file_vcf, fout, individual_col, chromosome_only=True, filter_PASS=True, info_field=None, info_field_thres=None, threads=1, chunk_size=2000):
+def convertVCF2MutationComplexStream(file_vcf, fout, individual_col, chromosome_only=True, filter_PASS=True, info_field=None, info_field_thres=None, threads=1, chunk_size=2000, individual_names=None):
     '''Convert VCF records to mutation TSV through an ordered streaming worker pool.'''
     if threads <= 1:
-        init_vcf_worker(individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, file_vcf)
+        init_vcf_worker(individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, file_vcf, individual_names)
         for lines in vcf_line_chunks(file_vcf, chunk_size=chunk_size, threads=threads):
             fout.write(processVCFChunkFast(lines))
         return
 
-    pool = Pool(threads, initializer=init_vcf_worker, initargs=(individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, file_vcf))
+    pool = Pool(threads, initializer=init_vcf_worker, initargs=(individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, file_vcf, individual_names))
     chunks = vcf_line_chunks(file_vcf, chunk_size=chunk_size, threads=threads)
     try:
         results = pool.imap(processVCFChunkFast, chunks, chunksize=1)
@@ -564,7 +630,7 @@ def process_manifest_row_python(task):
     individual_col = [row['sample_col']]
     row_values = {}
     for line in iter_vcf_records(row['filepath'], threads=1):
-        new_lines = processOneLineOfVCF(line, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, CHROMOSOMES, row['filepath'])
+        new_lines = processOneLineOfVCF(line, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, CHROMOSOMES, row['filepath'], [row['sample']])
         if not new_lines:
             continue
         for new_line in new_lines.rstrip('\n').split('\n'):
@@ -628,7 +694,7 @@ def convert_manifest_with_python(rows, file_output, file_output_done, filter_PAS
     return column_for_samples
 
 
-def convertVCFManifest2MutationComplex(file_manifest, outprefix=None, filter_PASS=True, chromosome_only=True, info_field=None, info_field_thres=None, threads=1):
+def convertVCFManifest2MutationComplex(file_manifest, outprefix=None, filter_PASS=True, chromosome_only=True, info_field=None, info_field_thres=None, threads=1, force=False):
     '''Convert a filepath manifest into the same population TSV produced from multi-sample VCF input.'''
     rows = read_vcf_manifest(file_manifest)
     if outprefix is None:
@@ -638,23 +704,33 @@ def convertVCFManifest2MutationComplex(file_manifest, outprefix=None, filter_PAS
     else:
         file_output = outprefix + '.tsv'
     file_output_done = file_output + '.done'
-    if os.path.exists(file_output_done):
+    cache = StageCache(
+        file_output, [file_manifest] + [row['filepath'] for row in rows],
+        {'mode': 'manifest', 'rows': rows, 'filter_pass': filter_PASS,
+         'chromosome_only': chromosome_only, 'info_field': info_field,
+         'info_field_thres': info_field_thres, 'threads': threads},
+        force=force,
+    )
+    if cache.prepare():
         print(f"Output file '{file_output}' already exists. Skipping.")
         return open(file_output_done, 'r').read().strip().split()
 
     if info_field:
         try:
             info_field_thres = float(info_field_thres)
-        except ValueError:
-            print(f"Error: --info_field_thres ('{info_field_thres}') must be a number.")
-            return []
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"--info_field_thres ({info_field_thres!r}) must be a number"
+            ) from exc
 
     print('use Python parser for manifest VCF files.')
-    return convert_manifest_with_python(rows, file_output, file_output_done, filter_PASS, chromosome_only, info_field, info_field_thres, threads)
+    columns = convert_manifest_with_python(rows, file_output, file_output_done, filter_PASS, chromosome_only, info_field, info_field_thres, threads)
+    cache.complete()
+    return columns
 
 
 
-def tsv2memmap(tsv_file, individuals = None, memmap_file=None, batch_size=100):
+def tsv2memmap(tsv_file, individuals = None, memmap_file=None, batch_size=100, force=False):
     '''tsv file is a tsv file with columns: chr, pos, ref, sample1__1, sample1__2, sample2__1, sample2__2, ..., sampleN__1, sampleN__2 columns
     individuals is a list of individuals to be used. the column values must be 0 or 1
     if memmap_file is None, memmap_file = tsv_file + '.memmap'
@@ -662,11 +738,7 @@ def tsv2memmap(tsv_file, individuals = None, memmap_file=None, batch_size=100):
     if memmap_file is None:
         memmap_file = tsv_file + '.memmap'
     
-    memmap_file_done = tsv_file + '.memmap.done'
-    
-    if os.path.exists(memmap_file_done):
-        print(f"memmap file '{memmap_file}' already exists, skipping")
-        return memmap_file
+    memmap_file_done = memmap_file + '.done'
 
     with open(tsv_file, 'rb') as fo:
         header = fo.readline().decode().rstrip('\n').split('\t')
@@ -684,6 +756,15 @@ def tsv2memmap(tsv_file, individuals = None, memmap_file=None, batch_size=100):
     missing = [individual for individual in individuals if individual not in column_to_index]
     if missing:
         raise ValueError('individual columns not found in tsv file: ' + ','.join(missing))
+    if not individuals:
+        raise ValueError('no individual columns selected for memmap conversion')
+    cache = StageCache(
+        memmap_file, [tsv_file],
+        {'individuals': list(individuals), 'dtype': 'int8'}, force=force,
+    )
+    if cache.prepare():
+        print(f"memmap file '{memmap_file}' already exists, skipping")
+        return memmap_file
     individual_indices = [column_to_index[individual] for individual in individuals]
     is_contiguous = individual_indices == list(range(individual_indices[0], individual_indices[0] + len(individual_indices)))
 
@@ -736,6 +817,7 @@ def tsv2memmap(tsv_file, individuals = None, memmap_file=None, batch_size=100):
     del mmap
     print(f"TSV file '{tsv_file}' has been successfully converted to memory-mapped file '{memmap_file}'")
     open(memmap_file_done, 'w').close()
+    cache.complete()
     return memmap_file
 
 def get_header_sample_col(file_vcf,individual_input="ALL_SAMPLES"):
@@ -773,40 +855,15 @@ def get_header_sample_col(file_vcf,individual_input="ALL_SAMPLES"):
         return '', [], None
             
     columns = header_line.strip().split('\t')
-    if len(columns) < 9:
-        print(f"Warning: #CHROM header line in {vcf_file_path} has fewer than 9 columns. Skipping.")
+    if len(columns) < 8:
+        print(f"Warning: #CHROM header line in {vcf_file_path} has fewer than 8 columns. Skipping.")
         fo.close()
         return '', [], None
-    
-
-    # Determine individuals and column indices
-    individual = []
-    individual_col = []
-    all_samples = columns[9:]
-
-    if individual_input == 'ALL_SAMPLES':
-        individual = all_samples
-    elif individual_input == 'ALL_VARIANTS':
-        individual = [] # No sample columns needed
-    elif individual_input is None:
-        if all_samples:
-            individual = [all_samples[0]] # Default to first sample
-            print(f"No sample specified, using first sample: {individual[0]}")
-        else:
-            print(f"Warning: No sample specified and no samples found in header of {vcf_file_path}. Processing as ALL_VARIANTS.")
-            individual = [] # Fallback to no samples
-    else:
-        requested_individuals = list(dict.fromkeys([i for i in individual_input.split(',') if i]))
-        individual = [s for s in requested_individuals if s in all_samples]
-        missing = [s for s in requested_individuals if s not in all_samples]
-        if missing:
-            print(f"Warning: Requested samples not found in {vcf_file_path}: {', '.join(missing)}")
-        if not individual:
-                print(f"Warning: None of the requested samples found in {vcf_file_path}. Processing as ALL_VARIANTS.")
-
-
-    # Get column indices for the selected individuals
-    individual_col = [columns.index(indi) for indi in individual]
+    try:
+        individual, individual_col = _resolve_sample_selection(columns, individual_input, vcf_file_path)
+    except Exception:
+        fo.close()
+        raise
     
     
     # Define output column names (only needs to be done once if consistent across files)
@@ -820,7 +877,7 @@ def get_header_sample_col(file_vcf,individual_input="ALL_SAMPLES"):
     
     return header_string, individual_col, fo
 
-def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL_SAMPLES", filter_PASS = True, chromosome_only = True, info_field = None, info_field_thres=None, threads = 1):
+def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL_SAMPLES", filter_PASS = True, chromosome_only = True, info_field = None, info_field_thres=None, threads = 1, force=False):
     '''convert vcf file to tsv file. with columns: chr, pos, ref, sample1__1, sample1__2, sample2__1, sample2__2, ..., sampleN__1, sampleN__2 columns
     If individual is None, use the first sample in the vcf file. 
     If individual == 'ALL_SAMPLES', use all samples in the vcf file.
@@ -830,7 +887,7 @@ def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL
     
     '''
     if is_manifest_file(file_vcf):
-        return convertVCFManifest2MutationComplex(file_vcf, outprefix, filter_PASS, chromosome_only, info_field, info_field_thres, threads)
+        return convertVCFManifest2MutationComplex(file_vcf, outprefix, filter_PASS, chromosome_only, info_field, info_field_thres, threads, force=force)
 
     if ',' in file_vcf:
         files_vcf = file_vcf.split(',')
@@ -858,18 +915,30 @@ def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL
     
     # check if file_output is already finished
     file_output_done = file_output + '.done'
-    if os.path.exists(file_output_done):
+    cache = StageCache(
+        file_output, files_vcf,
+        {'mode': 'vcf', 'selection': individual_input,
+         'filter_pass': filter_PASS, 'chromosome_only': chromosome_only,
+         'info_field': info_field, 'info_field_thres': info_field_thres,
+         'threads': threads},
+        force=force,
+    )
+    if cache.prepare():
         print(f"Output file '{file_output}' already exists. Skipping.")
         return open(file_output_done, 'r').read().strip().split()
     
     if info_field:
         try:
             info_field_thres = float(info_field_thres)
-        except ValueError:
-            print(f"Error: --info_field_thres ('{info_field_thres}') must be a number.")
-            return [] # Or raise error
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"--info_field_thres ({info_field_thres!r}) must be a number"
+            ) from exc
 
-    dc_header_string_and_other_info = {file_vcf:get_header_sample_col(file_vcf) for file_vcf in files_vcf}
+    dc_header_string_and_other_info = {
+        file_vcf: get_header_sample_col(file_vcf, individual_input=individual_input)
+        for file_vcf in files_vcf
+    }
     dc_header_string_and_other_info = {k:v for k,v in dc_header_string_and_other_info.items() if v[0]}
     if len(dc_header_string_and_other_info) == 0:
         return []
@@ -880,6 +949,7 @@ def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL
         return []
     header_string = list(dc_header_string_and_other_info.values())[0][0]
     column_for_samples = header_string.strip().split()[4:]
+    individual_names = [column[:-3] for column in column_for_samples[::2]]
     
     total_vcf_size = sum([os.path.getsize(file_vcf) for file_vcf in files_vcf])
     use_stream_pool = threads > 1 and total_vcf_size >= 10*1024*1024
@@ -891,7 +961,7 @@ def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL
             for file_vcf in dc_header_string_and_other_info:
                 _, individual_col, fo = dc_header_string_and_other_info[file_vcf]
                 fo.close()
-                convertVCF2MutationComplexStream(file_vcf, fout, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, threads=threads)
+                convertVCF2MutationComplexStream(file_vcf, fout, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, threads=threads, individual_names=individual_names)
                 print('finish converting vcf file:', file_vcf)
         else:
             for file_vcf in dc_header_string_and_other_info:
@@ -901,13 +971,14 @@ def convertVCF2MutationComplex(file_vcf, outprefix = None, individual_input="ALL
                 else:
                     to_iter = fo
                 for line in to_iter:
-                    new_line = processOneLineOfVCF(line, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, CHROMOSOMES, file_vcf)
+                    new_line = processOneLineOfVCF(line, individual_col, chromosome_only, filter_PASS, info_field, info_field_thres, CHROMOSOMES, file_vcf, individual_names)
                     if new_line:
                         fout.write(new_line)
                 fo.close()
                 print('finish converting vcf file:', file_vcf)
 
     open(file_output_done, 'w').write('\n'.join(column_for_samples))
+    cache.complete()
     return column_for_samples
 
 description = '''convert extract mutation information from vcf file
@@ -929,13 +1000,13 @@ def run_from_args(f):
 
     if is_manifest_file(f.file_vcf):
         print('convert manifest VCF list to mutation information in version 2.0 mode')
-        convertVCF2MutationComplex(file_vcf = f.file_vcf, outprefix = f.outprefix, individual_input='ALL_SAMPLES', filter_PASS = filter_PASS, chromosome_only = chromosome_only, info_field = f.info_field, info_field_thres = f.info_field_thres, threads = f.threads)
+        convertVCF2MutationComplex(file_vcf = f.file_vcf, outprefix = f.outprefix, individual_input='ALL_SAMPLES', filter_PASS = filter_PASS, chromosome_only = chromosome_only, info_field = f.info_field, info_field_thres = f.info_field_thres, threads = f.threads, force=f.force)
     elif sample is None:
         print('convert vcf to mutation information in version 1.0 mode')
         getMutationsFromVCF(file_vcf = f.file_vcf, outprefix = f.outprefix, individual=f.sample, filter_PASS = filter_PASS, chromosome_only = chromosome_only)
     elif ',' in  sample or sample == 'ALL_SAMPLES' or sample == 'ALL_VARIANTS':
         print('convert vcf to mutation information in version 2.0 mode')
-        convertVCF2MutationComplex(file_vcf = f.file_vcf, outprefix = f.outprefix, individual_input=f.sample, filter_PASS = filter_PASS, chromosome_only = chromosome_only, info_field = f.info_field, info_field_thres = f.info_field_thres, threads = f.threads)
+        convertVCF2MutationComplex(file_vcf = f.file_vcf, outprefix = f.outprefix, individual_input=f.sample, filter_PASS = filter_PASS, chromosome_only = chromosome_only, info_field = f.info_field, info_field_thres = f.info_field_thres, threads = f.threads, force=f.force)
     else:
         print('convert vcf to mutation information in version 1.0 mode')
         getMutationsFromVCF(file_vcf = f.file_vcf, outprefix = f.outprefix, individual=f.sample, filter_PASS = filter_PASS, chromosome_only = chromosome_only)

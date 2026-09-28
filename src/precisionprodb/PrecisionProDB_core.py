@@ -11,9 +11,11 @@ from array import array
 if __package__:
     from .args import add_argument_set
     from .perChrom import PerChrom
+    from .runstate import RunState
 else:
     from args import add_argument_set
     from perChrom import PerChrom
+    from runstate import RunState
 
 
 class _ChromosomeMemmapWriter:
@@ -450,7 +452,11 @@ class PerGeno(object):
         file_splitMutationByChromosomeLarge_done = os.path.join(tempfolder,'splitMutationByChromosomeLarge.done')
         if os.path.exists(file_splitMutationByChromosomeLarge_done):
             print('splitting the mutation file is already finished. use previous results')
-            chromosomes_mutation = open(file_splitMutationByChromosomeLarge_done).read().strip().split('\n')
+            chromosomes_mutation = open(file_splitMutationByChromosomeLarge_done).read().splitlines()
+            for chromosome in chromosomes_mutation:
+                split_file = os.path.join(tempfolder, chromosome + '.mutation.tsv')
+                if not os.path.isfile(split_file):
+                    raise ValueError(f'split mutation file missing: {split_file}; use --force')
             return chromosomes_mutation
         
         file_mutations = self.file_mutations
@@ -671,17 +677,14 @@ class PerGeno(object):
 
         # check if all files exists
         if not os.path.exists(fchr_genome):
-            print(chromosome, 'genome file not found. Proteins will be unchanged.')
-            return None
+            raise FileNotFoundError(f'genome split missing for {chromosome}: {fchr_genome}')
         if not os.path.exists(fchr_gtf):
-            print(chromosome, 'gtf file not found. Proteins will be unchanged.')
-            return None
+            raise FileNotFoundError(f'GTF split missing for {chromosome}: {fchr_gtf}')
         if not os.path.exists(fchr_mutations):
             print(chromosome, 'mutation file not found. Proteins will be unchanged.')
             return None
         if not os.path.exists(fchr_protein):
-            print(chromosome, 'protein file not found. Proteins will be unchanged.')
-            return None
+            raise FileNotFoundError(f'protein split missing for {chromosome}: {fchr_protein}')
         
         # run PerChrom
         print('started running perChrom for chromosome:', chromosome)
@@ -698,14 +701,11 @@ class PerGeno(object):
         # run perChrom
         try:
             perchrom.run_perChrom()
-            print('finished running perChrom for chromosome:', chromosome)
-            open(file_perChromFinished,'w').write(str(chromosome))
-            return chromosome
-        except:
-            print('cannot run perChrom for chromosome', chromosome, 'Proteins will be unchanged.')
-            return None
-        
-        return None
+        except Exception as exc:
+            raise RuntimeError(f'failed processing chromosome {chromosome}') from exc
+        print('finished running perChrom for chromosome:', chromosome)
+        open(file_perChromFinished,'w').write(str(chromosome))
+        return chromosome
 
 
     def runPerChom(self):
@@ -721,13 +721,19 @@ class PerGeno(object):
         # collect mutation annotations
         files_mutAnno = ['{}/{}.aa_mutations.csv'.format(self.tempfolder, chromosome) for chromosome in chromosomes_mutated]
         file_mutAnno = self.outprefix + '.pergeno.aa_mutations.csv'
-        try:
-            df_mutAnno = pd.concat([pd.read_csv(f, sep='\t') for f in files_mutAnno if os.path.exists(f)], ignore_index=True)
-            print('total number of proteins with AA mutation:', df_mutAnno.shape[0])
-            df_mutAnno.to_csv(file_mutAnno, sep='\t', index=None)
-        except:
-            print('cannot collect mutation annotations')
-            open(file_mutAnno,'w')
+        annotation_parts = [pd.read_csv(f, sep='\t') for f in files_mutAnno if os.path.exists(f)]
+        if annotation_parts:
+            df_mutAnno = pd.concat(annotation_parts, ignore_index=True)
+        else:
+            df_mutAnno = pd.DataFrame(columns=[
+                'protein_id', 'protein_id_fasta', 'seqname', 'strand',
+                'frameChange', 'stopGain', 'AA_stopGain', 'stopLoss',
+                'stopLoss_pos', 'nonStandardStopCodon', 'n_variant_AA',
+                'n_deletion_AA', 'n_insertion_AA', 'variant_AA',
+                'insertion_AA', 'deletion_AA', 'len_ref_AA', 'len_alt_AA',
+            ])
+        print('total number of proteins with AA mutation:', df_mutAnno.shape[0])
+        df_mutAnno.to_csv(file_mutAnno, sep='\t', index=None)
 
         # collect protein sequences
         files_proteins_changed = ['{}/{}.mutated_protein.fa'.format(self.tempfolder, chromosome) for chromosome in chromosomes_mutated]
@@ -797,21 +803,30 @@ def build_parser():
 
 
 def run_from_args(f):
-    pergeno = PerGeno(
-        file_genome = f.genome,
-        file_gtf=f.gtf,
-        file_mutations = f.mutations,
-        file_protein=f.protein,
-        threads=f.threads,
-        outprefix=f.out,
-        datatype=f.datatype,
-        protein_keyword=f.protein_keyword,
-        keep_all = f.keep_all
+    state = RunState.from_inputs(
+        f.out, f.mutations, '', f.genome, f.gtf, f.protein, '', False,
+        {'mutations': f.mutations, 'genome': f.genome, 'gtf': f.gtf,
+         'protein': f.protein, 'datatype': f.datatype,
+         'protein_keyword': f.protein_keyword, 'threads': f.threads,
+         'keep_all': f.keep_all},
+        force=f.force, keep_all=f.keep_all,
+    )
+    if state.prepare():
+        print(f'validated complete output for {f.out}; reusing it')
+        return
+    try:
+        pergeno = PerGeno(
+            file_genome=f.genome, file_gtf=f.gtf, file_mutations=f.mutations,
+            file_protein=f.protein, threads=f.threads, outprefix=f.out,
+            datatype=f.datatype, protein_keyword=f.protein_keyword,
+            keep_all=f.keep_all,
         )
-    # print(pergeno.__dict__)
-    pergeno.splitInputByChromosomes()
-    #print(pergeno.__dict__)
-    pergeno.runPerChom()
+        pergeno.splitInputByChromosomes()
+        pergeno.runPerChom()
+        state.complete()
+    except BaseException as exc:
+        state.fail(exc)
+        raise
 
 
 def main(argv=None):

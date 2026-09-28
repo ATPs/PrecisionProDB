@@ -10,6 +10,7 @@ if __package__:
     from .PrecisionProDB_core import PerGeno
     from .PrecisionProDB_vcf import runPerGenoVCF
     from .vcf2mutation import is_manifest_file
+    from .runstate import RunState, sqlite_owned_by_run
 else:
     from args import add_argument_set
     import buildSqlite
@@ -17,6 +18,7 @@ else:
     from PrecisionProDB_core import PerGeno
     from PrecisionProDB_vcf import runPerGenoVCF
     from vcf2mutation import is_manifest_file
+    from runstate import RunState, sqlite_owned_by_run
 
 def get_version():
     """Read version from version file"""
@@ -28,7 +30,7 @@ def get_version():
         return "unknown"
 
 description = '''
-PrecisionProDB, a personal proteogenomic tool which outputs a new reference protein based on the variants data. 
+PrecisionProDB, a personal proteogenomic tool which outputs a new reference protein based on the variants data.
 A VCF or /a tsv file can be used as the variant input. If the variant file is in tsv format, at least four columns are required in the header: chr, pos, ref, alt. Additional columns will be ignored. Try to Convert the file to proper format if you have a bed file or other types of variant file. The pos column is 1-based like in the vcf file.
 Additionally, a string like "chr1-788418-CAG-C" can used as variant input. It has to be combined with the --sqlite for quick check of the mutation effects
 '''
@@ -108,7 +110,7 @@ def run_from_args(f, parser=None):
         except ValueError as exc:
             argument_error(str(exc))
 
-    
+
     time0 = time.time()
 
     # create workfolder if not exist
@@ -119,7 +121,7 @@ def run_from_args(f, parser=None):
         if not os.path.exists(workfolder):
             os.makedirs(workfolder)
 
-    # download required files if download is set. will not download if file_sqlite is set. 
+    # download required files if download is set. will not download if file_sqlite is set.
     download = download.upper()
     if download != '':
         print('-D --download is set to be', download, '\n')
@@ -156,85 +158,111 @@ def run_from_args(f, parser=None):
     match = pattern.match(file_mutations)
     if match and (not os.path.exists(file_mutations)):
         if file_sqlite == '':
-            print(f'file_mutations is a string {file_mutations} while file_sqlite is not provided. exit...')
-            sys.exit()
-            
+            argument_error('mutation strings require SQLite annotation mode')
+
     if individual == 'ALL_SAMPLES' or individual == "ALL_VARIANTS" or ',' in str(individual):
         if file_sqlite == '':
-            print(f'sample is set to {individual}. In this case, --sqlite must be set. exit...')
-            sys.exit()
+            argument_error(f'sample selection {individual} requires SQLite annotation mode')
     if ',' in file_mutations or '*' in file_mutations or is_manifest_file(file_mutations):
         if file_sqlite == '':
-            print(f'mutations is set to {file_mutations}. In this case, --sqlite must be set. exit...')
-            sys.exit()
-    
-    if file_sqlite == '':
-        if file_mutations == '':
-            print('file_sqlite not provided. no input mutation file is provided. exit...')
-            sys.exit()
-        if file_mutations.lower().endswith('.vcf') or file_mutations.lower().endswith('.vcf.gz'):
-            print('variant file is a vcf file')
-            runPerGenoVCF(
-                file_genome = file_genome, 
-                file_gtf=file_gtf, 
-                file_mutations = file_mutations, 
-                file_protein=file_protein, 
-                threads=threads, 
-                outprefix=outprefix, 
-                datatype=datatype, 
-                protein_keyword=protein_keyword, 
-                filter_PASS=filter_PASS, 
-                individual=individual, 
-                chromosome_only=chromosome_only, 
-                keep_all=keep_all
-                )
-        else:
-            print('variant file is a tsv file')
-            pergeno = PerGeno(
-                file_genome = file_genome, 
-                file_gtf=file_gtf, 
-                file_mutations = file_mutations, 
-                file_protein=file_protein, 
-                threads=threads, 
-                outprefix=outprefix, 
-                datatype=datatype, 
-                protein_keyword=protein_keyword, 
-                keep_all=keep_all
-                )
-            #print(pergeno.__dict__)
-            pergeno.splitInputByChromosomes()
-            #print(pergeno.__dict__)
-            pergeno.runPerChom()
-    else:
-        # use Sqlite
-        if __package__:
-            from . import PrecisionProDB_Sqlite
-        else:
-            import PrecisionProDB_Sqlite
-        print('using sqlite database to speed up')
-        PrecisionProDB_Sqlite.main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite, info_field = f.info_field, info_field_thres = f.info_field_thres, peptide_config=peptide_config, peptide_sqlite=f.peptide_sqlite, rebuild_peptide_sqlite=f.rebuild_peptide_sqlite)
+            argument_error('multiple mutation inputs or VCF manifests require SQLite annotation mode')
 
-    pattern = re.compile(r'(chr)?(\d+)-(\d+)-([A-Za-z]+)-([A-Za-z]+)')
-    match = pattern.match(file_mutations)
-    if match and (not os.path.exists(file_mutations)):
-        if download == 'UNIPROT':
-            print(f'file_mutations is a string {file_mutations}. running with UniProt is not supported. will not extract UniProt sequences or generate PEFF file!')
-    else:
-        # deal with uniprot
-        if download == 'UNIPROT':
-            if file_sqlite != '' and file_protein == '':
-                print('extract all protein sequences from sqlite file')
-                file_protein = outprefix + '.file_proteins_input_from_sqlite.fasta'
-                buildSqlite.get_proteins_from_sqlite(file_sqlite, file_output = file_protein)
-
-            print('try to extract Uniprot proteins from Ensembl models')
-            if __package__:
-                from . import extractMutatedUniprot
+    owned_sqlite = sqlite_owned_by_run(
+        outprefix, file_sqlite, file_genome, file_gtf, file_protein,
+        default_mode=(f.sqlite == ''),
+    )
+    settings = {
+        'version': get_version(), 'mutations': file_mutations,
+        'datatype': datatype,
+        'protein_keyword': protein_keyword, 'sample': individual,
+        'filter_pass': filter_PASS, 'chromosome_only': chromosome_only,
+        'info_field': f.info_field, 'info_field_thres': f.info_field_thres,
+        'sqlite': os.path.abspath(file_sqlite) if file_sqlite else 'NONE',
+        'owned_sqlite': owned_sqlite, 'threads': threads,
+        'keep_all': keep_all,
+        'peptide': peptide_config.as_json() if peptide_config else None,
+        'peptide_sqlite': f.peptide_sqlite,
+        'rebuild_peptide_sqlite': f.rebuild_peptide_sqlite,
+        'peff': f.PEFF,
+        'download': download, 'uniprot_min_len': uniprot_min_len,
+    }
+    run_state = RunState.from_inputs(
+        outprefix, file_mutations, file_sqlite, file_genome, file_gtf,
+        file_protein, files_uniprot, is_manifest_file(file_mutations), settings,
+        force=f.force, keep_all=keep_all, owned_sqlite=owned_sqlite,
+    )
+    if run_state.prepare():
+        print(f'validated complete output for {outprefix}; reusing it')
+        return
+    try:
+        if file_sqlite == '':
+            if file_mutations == '':
+                argument_error('a mutation input is required')
+            if file_mutations.lower().endswith('.vcf') or file_mutations.lower().endswith('.vcf.gz'):
+                print('variant file is a vcf file')
+                runPerGenoVCF(
+                    file_genome = file_genome,
+                    file_gtf=file_gtf,
+                    file_mutations = file_mutations,
+                    file_protein=file_protein,
+                    threads=threads,
+                    outprefix=outprefix,
+                    datatype=datatype,
+                    protein_keyword=protein_keyword,
+                    filter_PASS=filter_PASS,
+                    individual=individual,
+                    chromosome_only=chromosome_only,
+                    keep_all=keep_all
+                    )
             else:
-                import extractMutatedUniprot
-            extractMutatedUniprot.extractMutatedUniprot(files_uniprot=files_uniprot, files_ref=file_protein, files_alt=outprefix + '.pergeno.protein_all.fa', outprefix=outprefix, length_min = uniprot_min_len)
+                print('variant file is a tsv file')
+                pergeno = PerGeno(
+                    file_genome = file_genome,
+                    file_gtf=file_gtf,
+                    file_mutations = file_mutations,
+                    file_protein=file_protein,
+                    threads=threads,
+                    outprefix=outprefix,
+                    datatype=datatype,
+                    protein_keyword=protein_keyword,
+                    keep_all=keep_all
+                    )
+                #print(pergeno.__dict__)
+                pergeno.splitInputByChromosomes()
+                #print(pergeno.__dict__)
+                pergeno.runPerChom()
+        else:
+            # use Sqlite
+            if __package__:
+                from . import PrecisionProDB_Sqlite
+            else:
+                import PrecisionProDB_Sqlite
+            print('using sqlite database to speed up')
+            PrecisionProDB_Sqlite.main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite, info_field = f.info_field, info_field_thres = f.info_field_thres, peptide_config=peptide_config, peptide_sqlite=f.peptide_sqlite, rebuild_peptide_sqlite=f.rebuild_peptide_sqlite)
 
-        # generate PEFF output file
+        pattern = re.compile(r'(chr)?(\d+)-(\d+)-([A-Za-z]+)-([A-Za-z]+)')
+        match = pattern.match(file_mutations)
+        is_variant_string = bool(match and not os.path.exists(file_mutations))
+        if is_variant_string:
+            if download == 'UNIPROT':
+                print(f'file_mutations is a string {file_mutations}. UniProt extraction is not supported for this input.')
+        else:
+            # deal with uniprot
+            if download == 'UNIPROT':
+                if file_sqlite != '' and file_protein == '':
+                    print('extract all protein sequences from sqlite file')
+                    file_protein = outprefix + '.file_proteins_input_from_sqlite.fasta'
+                    buildSqlite.get_proteins_from_sqlite(file_sqlite, file_output = file_protein)
+
+                print('try to extract Uniprot proteins from Ensembl models')
+                if __package__:
+                    from . import extractMutatedUniprot
+                else:
+                    import extractMutatedUniprot
+                extractMutatedUniprot.extractMutatedUniprot(files_uniprot=files_uniprot, files_ref=file_protein, files_alt=outprefix + '.pergeno.protein_all.fa', outprefix=outprefix, length_min = uniprot_min_len)
+
+        # PEFF is meaningful for direct variant strings too; only the UniProt
+        # projection requires a file-based cohort input.
         if f.PEFF:
             if __package__:
                 from . import generatePEFFoutput
@@ -242,16 +270,24 @@ def run_from_args(f, parser=None):
                 import generatePEFFoutput
             generatePEFFoutput.generatePEFFoutput(file_protein = file_protein, file_mutation = outprefix + '.pergeno.aa_mutations.csv', file_out = outprefix + '.pergeno.protein_PEFF.fa', TEST=False, file_sqlite = file_sqlite)
 
-            if download == 'UNIPROT':
+            if download == 'UNIPROT' and not is_variant_string:
                 generatePEFFoutput.generateUniprotPEFFout(file_PEFF = outprefix + '.pergeno.protein_PEFF.fa', files_uniprot_ref = files_uniprot, file_uniprot_changed = outprefix + '.uniprot_changed.tsv', file_uniprot_out = outprefix + '.uniprot_PEFF.fa')
 
+
+        run_state.complete()
+    except BaseException as exc:
+        run_state.fail(exc)
+        raise
 
     print('PrecisionProDB finished! Total seconds:', time.time() - time0)
 
 
 def main(argv=None):
     parser = build_parser()
-    run_from_args(parser.parse_args(argv), parser=parser)
+    try:
+        run_from_args(parser.parse_args(argv), parser=parser)
+    except (FileNotFoundError, ValueError) as exc:
+        parser.error(str(exc))
 
 
 if __name__ == '__main__':

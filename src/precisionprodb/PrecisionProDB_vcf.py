@@ -33,6 +33,23 @@ def readProtein2DF(filename):
     tdf['seq'] = [str(e.seq) for e in ls]
     return tdf
 
+
+def write_reference_only_vcf_outputs(file_protein, outprefix):
+    """Preserve a complete search database for a valid VCF with no AA changes."""
+    annotation = outprefix + '.pergeno.aa_mutations.csv'
+    pd.DataFrame(columns=[
+        'protein_id_fasta', 'seqname', 'strand', 'frameChange',
+        'stopGain', 'AA_stopGain', 'stopLoss', 'stopLoss_pos',
+        'nonStandardStopCodon', 'n_variant_AA', 'n_deletion_AA',
+        'n_insertion_AA', 'variant_AA', 'insertion_AA',
+        'deletion_AA', 'len_ref_AA', 'len_alt_AA',
+    ]).to_csv(annotation, sep='\t', index=False)
+    with open(outprefix + '.pergeno.protein_changed.fa', 'w'):
+        pass
+    with open(outprefix + '.pergeno.protein_all.fa', 'w') as handle:
+        for record in SeqIO.parse(openFile(file_protein), 'fasta'):
+            handle.write(f'>{record.description}\tunchanged\n{record.seq}\n')
+
 def runPerGenoVCF(
                     file_genome,
                     file_gtf,
@@ -84,7 +101,8 @@ def runPerGenoVCF(
     df_seqs_changed_2['batch'] = '2'
     df_seqs_changed = pd.concat([df_seqs_changed_1,df_seqs_changed_2], ignore_index=True)
     if df_seqs_changed.shape[0] == 0:
-        print('no mutated proteins predicted. Will stop here. You may need to clean the intermediate files!')
+        write_reference_only_vcf_outputs(file_protein, outprefix)
+        print('no mutated proteins predicted; wrote reference-only outputs')
         return None
     
     # read in the mutation files
@@ -103,11 +121,20 @@ def runPerGenoVCF(
     df_mutations_2['batch'] = '2'
     df_mutations = pd.concat([df_mutations_1, df_mutations_2], ignore_index=True)
     if df_mutations.shape[0] == 0:
-        print('nno mutated proteins predicted. Will stop here. You may need to clean the intermediate files!')
+        write_reference_only_vcf_outputs(file_protein, outprefix)
+        print('no mutated proteins predicted; wrote reference-only outputs')
         return None
 
-    # join the mutation and protein file
-    df_joined = df_seqs_changed.merge(df_mutations, left_on = ['seq_id','batch'], right_on = ['protein_id_fasta','batch'])
+    # Per-chromosome annotation rows number alternate protein IDs (P__1),
+    # while their FASTA retains the source protein ID (P).
+    df_mutations['seq_id_base'] = df_mutations['protein_id_fasta'].str.replace(
+        r'__\d+$', '', regex=True
+    )
+    df_joined = df_seqs_changed.merge(
+        df_mutations, left_on=['seq_id', 'batch'], right_on=['seq_id_base', 'batch']
+    )
+    if df_joined.empty:
+        raise ValueError('changed protein FASTA and mutation annotations have no matching IDs')
 
     df_joined_dedup = df_joined.fillna('')
     df_joined_dedup = df_joined_dedup.groupby(by = [e for e in df_joined_dedup.columns if e != 'batch'])['batch'].apply(lambda x:';'.join(str(e) for e in x)).reset_index()

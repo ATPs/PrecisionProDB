@@ -17,12 +17,14 @@ if __package__:
     from . import perChrom
     from . import perChromSqlite
     from .PrecisionProDB_core import PerGeno, get_k_new
+    from .runstate import RunState, sqlite_owned_by_run
 else:
     from args import add_argument_set
     import buildSqlite
     import perChrom
     import perChromSqlite
     from PrecisionProDB_core import PerGeno, get_k_new
+    from runstate import RunState, sqlite_owned_by_run
 
 # code below for testing the the program
 TEST = False
@@ -70,9 +72,8 @@ def runSinglePerChromSqlite(file_sqlite, file_mutations, tempfolder, threads, ch
     try:
         df_changed = perchrom_sqlite.run_perChrom()
         print('finished running perchrom_sqlite for chromosome:', chromosome)
-    except Exception as e:
-        print('cannot run perchrom_sqlite for chromosome', chromosome, 'Proteins will be unchanged. Error message:', e)
-        return None
+    except Exception as exc:
+        raise RuntimeError(f'failed processing chromosome {chromosome}') from exc
     if peptide_config is not None:
         if __package__:
             from . import peptide
@@ -158,7 +159,19 @@ def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_ke
     # collect mutation annotations
     files_mutAnno = ['{}/{}.aa_mutations.csv'.format(tempfolder, chromosome) for chromosome in chromosomes_mutated]
     file_mutAnno = outprefix + '.pergeno.aa_mutations.csv'
-    df_mutAnno = pd.concat([pd.read_csv(f, sep='\t', low_memory=False) for f in files_mutAnno if os.path.exists(f)], ignore_index=True)
+    annotation_parts = [pd.read_csv(f, sep='\t', low_memory=False)
+                        for f in files_mutAnno if os.path.exists(f)]
+    if annotation_parts:
+        df_mutAnno = pd.concat(annotation_parts, ignore_index=True)
+    else:
+        df_mutAnno = pd.DataFrame(columns=[
+            'protein_id', 'protein_id_fasta', 'seqname', 'strand',
+            'frameChange', 'stopGain', 'AA_stopGain', 'stopLoss',
+            'stopLoss_pos', 'nonStandardStopCodon', 'n_variant_AA',
+            'n_deletion_AA', 'n_insertion_AA', 'variant_AA',
+            'insertion_AA', 'deletion_AA', 'len_ref_AA', 'len_alt_AA',
+            'individual',
+        ])
     print('total number of proteins with AA mutation:', df_mutAnno.shape[0])
     df_mutAnno.to_csv(file_mutAnno, sep='\t', index=None)
 
@@ -175,6 +188,8 @@ def runPerChomSqlite(file_sqlite, file_mutations, threads, outprefix, protein_ke
                 if os.path.exists(candidate):
                     sample_header_file = candidate
                     break
+            if sample_header_file is None and os.path.isfile(file_mutations):
+                sample_header_file = file_mutations
             if sample_header_file:
                 with openFile(sample_header_file, 'r') as fo:
                     header_columns = fo.readline().strip().split('\t')
@@ -349,6 +364,58 @@ def check_sqlite_file(file_path):
         # Close the database connection if it was opened
         if 'conn' in locals():
             conn.close()
+
+
+def write_reference_only_from_sqlite(file_sqlite, outprefix, peptide=False):
+    """Write the ordinary output schema for a valid run with no AA changes."""
+    conn = buildSqlite.get_connection(file_sqlite)
+    try:
+        proteins = pd.read_sql_query(
+            'SELECT protein_description, AA_seq FROM protein_description', conn
+        )
+    finally:
+        conn.close()
+    pd.DataFrame(columns=[
+        'protein_id', 'protein_id_fasta', 'seqname', 'strand',
+        'frameChange', 'stopGain', 'AA_stopGain', 'stopLoss',
+        'stopLoss_pos', 'nonStandardStopCodon', 'n_variant_AA',
+        'n_deletion_AA', 'n_insertion_AA', 'variant_AA',
+        'insertion_AA', 'deletion_AA', 'len_ref_AA', 'len_alt_AA',
+    ]).to_csv(outprefix + '.pergeno.aa_mutations.csv', sep='\t', index=False)
+    with open(outprefix + '.pergeno.protein_changed.fa', 'w'):
+        pass
+    with open(outprefix + '.pergeno.mutated_protein.fa', 'w'):
+        pass
+    with open(outprefix + '.pergeno.protein_all.fa', 'w') as handle:
+        for row in proteins.itertuples(index=False):
+            handle.write(f'>{row.protein_description}\tunchanged\n{row.AA_seq}\n')
+    if peptide:
+        if __package__:
+            from . import peptide as peptide_module
+        else:
+            import peptide as peptide_module
+        peptide_module.merge_novel_peptide_parts([], outprefix)
+
+
+def write_direct_variant_protein_database(file_sqlite, outprefix):
+    """Add reference proteins to a direct variant-string translation result."""
+    changed_path = outprefix + '.pergeno.mutated_protein.fa'
+    changed_records = list(SeqIO.parse(changed_path, 'fasta'))
+    changed_ids = {record.id for record in changed_records}
+    shutil.copyfile(changed_path, outprefix + '.pergeno.protein_changed.fa')
+    conn = buildSqlite.get_connection(file_sqlite)
+    try:
+        proteins = pd.read_sql_query(
+            'SELECT protein_description, AA_seq FROM protein_description', conn
+        )
+    finally:
+        conn.close()
+    with open(outprefix + '.pergeno.protein_all.fa', 'w') as handle:
+        for row in proteins.itertuples(index=False):
+            if str(row.protein_description).split(maxsplit=1)[0] not in changed_ids:
+                handle.write(f'>{row.protein_description}\tunchanged\n{row.AA_seq}\n')
+        for record in changed_records:
+            handle.write(f'>{record.description}\n{record.seq}\n')
             
 def main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite, info_field=None, info_field_thres=None, peptide_config=None, peptide_sqlite=None, rebuild_peptide_sqlite=False):
     '''
@@ -357,8 +424,7 @@ def main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protei
 
     if os.path.exists(file_sqlite):
         if not check_sqlite_file(file_sqlite):
-            print(f'sqlite file "{file_sqlite}" is not good? delete the file before running the program!!!')
-            sys.exit()
+            raise ValueError(f'invalid annotation SQLite file: {file_sqlite}')
         else:
             print('running in sqlite mode')
             print(f'use existing sqlite file "{file_sqlite}" for gene annotation')
@@ -426,18 +492,27 @@ def main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protei
             ls_results.append(perchrom_sqlite.run_perChrom(save_results=False))
         # Keep the canonical protein_id index so peptide mappings can join back
         # to the annotation SQLite in the single-variant fast path.
-        df_transcript3 = pd.concat(ls_results)
-        df_changed = perChrom.save_mutation_and_proteins(df_transcript3, outprefix)
+        df_transcript3 = pd.concat(ls_results) if ls_results else pd.DataFrame()
+        if df_transcript3.empty:
+            write_reference_only_from_sqlite(file_sqlite, outprefix,
+                                             peptide=peptide_config is not None)
+            df_changed = pd.DataFrame()
+        else:
+            df_changed = perChrom.save_mutation_and_proteins(df_transcript3, outprefix)
+            if df_changed.empty:
+                write_reference_only_from_sqlite(file_sqlite, outprefix,
+                                                 peptide=peptide_config is not None)
         if peptide_config is not None:
             if __package__:
                 from . import peptide
             else:
                 import peptide
             part_file = os.path.join(tempfolder, 'single.peptide_novel.tsv')
-            peptide.write_novel_peptide_part(
-                df_changed, known_peptide_index, part_file, peptide_config, threads=threads
-            )
-            peptide.merge_novel_peptide_parts([part_file], outprefix)
+            if not df_changed.empty:
+                peptide.write_novel_peptide_part(
+                    df_changed, known_peptide_index, part_file, peptide_config, threads=threads
+                )
+                peptide.merge_novel_peptide_parts([part_file], outprefix)
         # clear temp folder
         if keep_all:
             print('keep all intermediate files')
@@ -450,6 +525,8 @@ def main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protei
             os.rename(outprefix + '.aa_mutations.csv',outprefix + '.pergeno.aa_mutations.csv')
         if os.path.exists(outprefix + '.mutated_protein.fa'):
             os.rename(outprefix + '.mutated_protein.fa',outprefix + '.pergeno.mutated_protein.fa')
+        if not df_changed.empty:
+            write_direct_variant_protein_database(file_sqlite, outprefix)
         print('finished!')
         
     elif file_mutations.lower().endswith('.vcf') or file_mutations.lower().endswith('.vcf.gz') or is_manifest_file(file_mutations):
@@ -546,6 +623,14 @@ def main(argv=None):
     chromosome_only = not f.all_chromosomes
     keep_all = f.keep_all
     file_sqlite = f.sqlite
+    if file_sqlite == 'NONE':
+        parser.error('PrecisionProDB_Sqlite requires SQLite annotation mode')
+    if not file_sqlite:
+        file_sqlite = outprefix + '.sqlite'
+    owned_sqlite = sqlite_owned_by_run(
+        outprefix, file_sqlite, file_genome, file_gtf, file_protein,
+        default_mode=(f.sqlite == ''),
+    )
     peptide_config = None
     if not f.peptide and (f.peptide_sqlite or f.rebuild_peptide_sqlite):
         parser.error('--peptide-sqlite and --rebuild-peptide-sqlite require --peptide')
@@ -563,7 +648,46 @@ def main(argv=None):
     print(description)
     print(f)
 
-    main_PrecsionProDB_Sqlite(file_genome, file_gtf, file_mutations, file_protein, threads, outprefix, datatype, protein_keyword, filter_PASS, individual, chromosome_only, keep_all, file_sqlite, info_field=f.info_field, info_field_thres=f.info_field_thres, peptide_config=peptide_config, peptide_sqlite=f.peptide_sqlite, rebuild_peptide_sqlite=f.rebuild_peptide_sqlite)
+    if __package__:
+        from .vcf2mutation import is_manifest_file
+    else:
+        from vcf2mutation import is_manifest_file
+    state = RunState.from_inputs(
+        outprefix, file_mutations, file_sqlite, file_genome, file_gtf,
+        file_protein, '', is_manifest_file(file_mutations),
+        {'mutations': file_mutations, 'sqlite': os.path.abspath(file_sqlite),
+         'owned_sqlite': owned_sqlite, 'sample': individual,
+         'datatype': datatype, 'protein_keyword': protein_keyword,
+         'filter_pass': filter_PASS, 'chromosome_only': chromosome_only,
+         'info_field': f.info_field, 'info_field_thres': f.info_field_thres,
+         'peptide': peptide_config.as_json() if peptide_config else None,
+         'peptide_sqlite': f.peptide_sqlite,
+         'rebuild_peptide_sqlite': f.rebuild_peptide_sqlite,
+         'keep_all': keep_all, 'threads': threads},
+        force=f.force, keep_all=keep_all, owned_sqlite=owned_sqlite,
+    )
+    try:
+        if state.prepare():
+            print(f'validated complete output for {outprefix}; reusing it')
+            return
+    except (FileNotFoundError, ValueError) as exc:
+        parser.error(str(exc))
+    try:
+        main_PrecsionProDB_Sqlite(
+            file_genome, file_gtf, file_mutations, file_protein, threads,
+            outprefix, datatype, protein_keyword, filter_PASS, individual,
+            chromosome_only, keep_all, file_sqlite, info_field=f.info_field,
+            info_field_thres=f.info_field_thres, peptide_config=peptide_config,
+            peptide_sqlite=f.peptide_sqlite,
+            rebuild_peptide_sqlite=f.rebuild_peptide_sqlite,
+        )
+        state.complete()
+    except (FileNotFoundError, ValueError) as exc:
+        state.fail(exc)
+        parser.error(str(exc))
+    except BaseException as exc:
+        state.fail(exc)
+        raise
 
 if __name__ == '__main__':
     main()

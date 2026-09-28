@@ -69,7 +69,7 @@ PEFFheader = '''# PEFF 1.0
 '''
 
 def generatePEFF(seq, mutations='', Prefix="PrecisionProDB"):
-    '''return a string in PEFF format by adding mutations to the fasta header
+    r'''return a string in PEFF format by adding mutations to the fasta header
     seq is a SeqIO object, the header like looks like
         ENSP00000320232.3|ENST00000322527.4|ENSG00000175820.4|OTTHUMG00000187287.2|OTTHUMT00000474707.2|CCDC168-201|CCDC168|7081
         only seq.id will be kept.
@@ -198,9 +198,10 @@ def generateUniprotPEFFout(file_PEFF, files_uniprot_ref, file_uniprot_changed, f
 
     # read file_uniprot_changed to a dataframe
     df_changed = pd.read_csv(file_uniprot_changed, sep='\t')
-    dc_ref2uni = dict(zip(df_changed['ref_id'], df_changed['uniprot_id']))
-    uniprot_ids = set(dc_ref2uni.values())
-    dc_uni2ref = dict(zip(df_changed['uniprot_id'], df_changed['ref_id']))
+    dc_uni2refs = {
+        uniprot_id: sorted(set(group['ref_id']))
+        for uniprot_id, group in df_changed.groupby('uniprot_id')
+    }
 
     # prepare PEFF header
     PEFFheader_use = PEFFheader.format(Prefix='PrecisionProDB', DbSource=files_uniprot_ref, DbVersion=get_current_time(), NumberOfEntries=len(dc_uniprot))
@@ -208,15 +209,22 @@ def generateUniprotPEFFout(file_PEFF, files_uniprot_ref, file_uniprot_changed, f
     with open(file_uniprot_out, 'w') as f:
         f.write(PEFFheader_use)
         for k, v in dc_uniprot.items():
-            if k not in uniprot_ids:
+            if k not in dc_uni2refs:
                 f.write(generatePEFF(v))
             else:
-                ref_id = dc_uni2ref[k]
-                seq = dc_PEFF[ref_id]
-                seq_id, seq_annotation = seq.description.split(' ', maxsplit=1)
-                seq_id = seq_id.split(':')[0] + ':' + k
-                header = seq_id + ' ' + seq_annotation
-                f.write('>{}\n{}\n'.format(header, str(seq.seq)))
+                # Multiple reference IDs may share the same UniProt sequence.
+                # Union their variant annotations instead of selecting the last
+                # row of the relationship table according to FASTA order.
+                variants = set()
+                for ref_id in dc_uni2refs[k]:
+                    if ref_id not in dc_PEFF:
+                        raise ValueError(f'PEFF reference {ref_id} is missing for UniProt {k}')
+                    description = dc_PEFF[ref_id].description
+                    match = re.search(r'\\VariantSimple=([^\s]+)', description)
+                    if match:
+                        variants.update(re.findall(r'\([^()]*\)', match.group(1)))
+                annotation = ' \\VariantSimple=' + ''.join(sorted(variants)) if variants else ''
+                f.write(f'>PrecisionProDB:{k}{annotation} \\Length={len(v.seq)}\n{v.seq}\n')
     
     return None
 

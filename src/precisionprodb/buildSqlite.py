@@ -11,6 +11,7 @@ import sys
 import sqlite3
 import numpy as np
 from multiprocessing import Pool
+import tempfile
 
 if __package__:
     from .args import add_argument_set
@@ -496,36 +497,31 @@ def get_protein_ids_from_tdf_bisect(tdf, pos, pos_end=None, starts=None, ends=No
     if pos_end is None:
         pos_end = pos
         
-    # Convert positions to numpy array for faster searching
+    # SQLite genomicLocs intervals use 1-based inclusive coordinates.
     if starts is None:
-        starts = tdf['genomicLocs_start'].values + 1
+        starts = tdf['genomicLocs_start'].values
     if ends is None:
         ends = tdf['genomicLocs_end'].values
-    
-    # Find the rightmost position where genomicLocs_start <= pos
-    # This gives us the lower bound of our slice
-    end_idx = starts.searchsorted(pos, side='right')
-    # print(end_idx)
-    ls_idx = []
-    for i in range(end_idx-1, 0,-1):
-        if starts[i] <= pos:
-            ls_idx.append(i)
-            # print(tdf.iloc[i])
-        else:
-            break
-    
-    tdf1 = tdf.iloc[ls_idx]
 
-    return tdf1[(tdf1['genomicLocs_start'] < pos) & (tdf1['genomicLocs_end'] >= pos_end)]['protein_id'].tolist()
+    # Starts are sorted. Restrict candidates to intervals that could contain
+    # the complete queried range, then apply the inclusive interval check.
+    max_interval_length = int((ends - starts).max()) if len(starts) else 0
+    left = starts.searchsorted(pos_end - max_interval_length, side='left')
+    right = starts.searchsorted(pos, side='right')
+    candidates = tdf.iloc[left:right]
+    matching = candidates[
+        (candidates['genomicLocs_start'] <= pos)
+        & (candidates['genomicLocs_end'] >= pos_end)
+    ]
+    return matching['protein_id'].tolist()
 
 def get_protein_ids_from_tdf(tdf, pos, pos_end=None):
     # If pos_end is not provided, set it equal to pos
     if pos_end is None:
         pos_end = pos
     
-    # Filter rows where genomicLocs_start < pos_end and genomicLocs_end >= pos
-    # This checks if the interval [pos, pos_end] is within the interval [genomicLocs_start, genomicLocs_end]
-    matching_rows = tdf[(tdf['genomicLocs_start'] < pos) & (tdf['genomicLocs_end'] >= pos_end)]
+    # Both stored coordinates and query coordinates are 1-based inclusive.
+    matching_rows = tdf[(tdf['genomicLocs_start'] <= pos) & (tdf['genomicLocs_end'] >= pos_end)]
 
     # Extract the corresponding protein_ids from the filtered rows
     matching_protein_ids = matching_rows['protein_id'].tolist()
@@ -551,7 +547,7 @@ def get_protein_ids_from_tdf_batch(tdf, params):
     results = []
     for pos, pos_end in params:
         left = np.searchsorted(starts, pos_end - max_interval_length, side='left')
-        right = np.searchsorted(starts, pos, side='left')
+        right = np.searchsorted(starts, pos, side='right')
         if right <= left:
             results.append([])
             continue
@@ -564,10 +560,8 @@ def get_protein_ids_from_tdf_batch(tdf, params):
 def get_protein_id_from_genomicLocs(con, chromosome, pos, pos_end=None, threads=None):
     '''
     Given a chromosome and a position, return the protein_ids from the genomicLocs table of that chromosome,
-    where genomicLocs_start < pos_end <= genomicLocs_end.
-    if pos_end is set, then genomicLocs_start < pos <= genomicLocs_end.
-    Note, genomicLocs_start is 0-based
-    pos is 1-based
+    where [pos, pos_end] is contained in [genomicLocs_start, genomicLocs_end].
+    Both stored and query coordinates are 1-based inclusive.
     if pos is a list, return a list for each pos
     if threads is not None, try to use multiple threading and read a table to a dataframe
     '''
@@ -587,7 +581,7 @@ def get_protein_id_from_genomicLocs(con, chromosome, pos, pos_end=None, threads=
             params = [(chromosome[i], pos[i], pos[i]) for i in range(len(pos))]
     else:
         if pos_end is not None:
-            params = [(chromosome, int(pos), int(pos))]
+            params = [(chromosome, int(pos), int(pos_end))]
         else:
             params = [(chromosome, int(pos), int(pos))]
     cur = con.cursor()
@@ -596,8 +590,7 @@ def get_protein_id_from_genomicLocs(con, chromosome, pos, pos_end=None, threads=
         for a_chromosome, a_pos, a_pos_end in params:
             table_name = f'genomicLocs_{a_chromosome}'
             try:
-                # Query to find rows where the position falls between genomicLocs_start and genomicLocs_end
-                query = f'SELECT protein_id FROM "{table_name}" WHERE genomicLocs_start < ? AND genomicLocs_end >= ?'
+                query = f'SELECT protein_id FROM "{table_name}" WHERE genomicLocs_start <= ? AND genomicLocs_end >= ?'
                 cur.execute(query, (a_pos, a_pos_end))
                 rows = cur.fetchall()
                 # Extract the protein_ids from the result rows
@@ -635,7 +628,7 @@ def get_protein_id_from_genomicLocs(con, chromosome, pos, pos_end=None, threads=
     else:
         return results[0]
 
-def create_sqlite(file_sqlite, file_genome, file_gtf, file_protein, outprefix, datatype, protein_keyword, threads=None, keep_all=False):
+def create_sqlite(file_sqlite, file_genome, file_gtf, file_protein, outprefix, datatype, protein_keyword, threads=None, keep_all=False, force=False):
     '''
     Create a SQLite database containing genomic and protein information.
 
@@ -648,10 +641,29 @@ def create_sqlite(file_sqlite, file_genome, file_gtf, file_protein, outprefix, d
     - datatype: Type of input data (e.g., GENCODE_GTF, GENCODE_GFF3).
     - protein_keyword: Keyword for filtering protein sequences.
     - keep_all: Boolean to indicate if all data should be kept.
+    - force: Replace an existing SQLite database only after the new database
+      has been built and closed successfully.
     '''
     if os.path.exists(file_sqlite):
-        print(f'sqlite file "{file_sqlite}" already exists; remove it to avoid duplicated records')
-        os.remove(file_sqlite)
+        if not force:
+            raise FileExistsError(
+                f'sqlite file "{file_sqlite}" already exists; pass --force to replace it'
+            )
+
+    tempfolder = outprefix + '_temp'
+    if os.path.isdir(tempfolder) and os.listdir(tempfolder):
+        if not force:
+            raise ValueError(
+                f'unverified SQLite build intermediates exist in {tempfolder}; '
+                'use a fresh output prefix or --force'
+            )
+        if keep_all:
+            archive_base = outprefix + '.archive'
+            os.makedirs(archive_base, exist_ok=True)
+            archive = tempfile.mkdtemp(prefix='sqlite-build-', dir=archive_base)
+            shutil.move(tempfolder, os.path.join(archive, os.path.basename(tempfolder)))
+        else:
+            shutil.rmtree(tempfolder)
 
     pergeno = PerGeno(
         file_genome = file_genome, 
@@ -710,8 +722,18 @@ def create_sqlite(file_sqlite, file_genome, file_gtf, file_protein, outprefix, d
             )
     payload_infos_by_chromosome = {payload_info['chromosome']: payload_info for payload_info in payload_infos}
 
-    # create a sqlite3 file
-    con = sqlite3.connect(file_sqlite)
+    # Create a temporary database beside the destination so installation is atomic.
+    output_dir = os.path.dirname(os.path.abspath(file_sqlite))
+    os.makedirs(output_dir, exist_ok=True)
+    temp_handle = tempfile.NamedTemporaryFile(
+        prefix=os.path.basename(file_sqlite) + '.tmp.',
+        suffix='.sqlite',
+        dir=output_dir,
+        delete=False,
+    )
+    temp_sqlite = temp_handle.name
+    temp_handle.close()
+    con = sqlite3.connect(temp_sqlite)
     try:
         configure_sqlite_for_bulk_load(con)
         con.execute('BEGIN IMMEDIATE')
@@ -738,9 +760,26 @@ def create_sqlite(file_sqlite, file_genome, file_gtf, file_protein, outprefix, d
         print('building sqlite done')
     except Exception:
         con.rollback()
+        con.close()
+        try:
+            os.unlink(temp_sqlite)
+        except FileNotFoundError:
+            pass
         raise
     finally:
         con.close()
+    # Install only a complete, closed database. Retain the old database when
+    # --keep_all was requested, and keep it in place if installation fails.
+    try:
+        if force and keep_all and os.path.exists(file_sqlite):
+            archive_base = outprefix + '.archive'
+            os.makedirs(archive_base, exist_ok=True)
+            archive = tempfile.mkdtemp(prefix='sqlite-database-', dir=archive_base)
+            shutil.copy2(file_sqlite, os.path.join(archive, os.path.basename(file_sqlite)))
+        os.replace(temp_sqlite, file_sqlite)
+    except Exception:
+        os.unlink(temp_sqlite)
+        raise
     # clear temp folder
     tempfolder = pergeno.tempfolder
     if keep_all:
@@ -839,7 +878,8 @@ def run_from_args(args):
         datatype=args.datatype,
         protein_keyword=args.protein_keyword,
         keep_all=args.keep_all,
-        threads=args.threads
+        threads=args.threads,
+        force=args.force,
     )
     
     print('SQLite creation complete.')

@@ -1,35 +1,83 @@
-import os
 import argparse
+import csv
+import os
+import shlex
 import subprocess
+import sys
 import time
 
+from Bio import SeqIO
 
-def run_command(command):
+
+def run_command(command, cwd=None):
     """
     Run a system command using subprocess and print the output.
     """
-    print(f"Running command: {command}")
+    display_command = ' '.join(shlex.quote(part) for part in command)
+    print(f"Running command: {display_command}")
     start_time = time.time()
-    result = subprocess.run(command, shell=True)
+    result = subprocess.run(command, cwd=cwd, check=False)
     end_time = time.time()
     elapsed_time = end_time - start_time
     print(f"Command finished in {elapsed_time:.2f} seconds\n\n")
     if result.returncode != 0:
-        print(f"Error running command: {command}\n\n")
-        return command, 'failed'
+        print(f"Error running command (exit {result.returncode}): {display_command}\n\n")
+        return display_command, 'failed'
     else:
-        return command, 'completed'
+        return display_command, 'completed'
+
+
+def validate_case_outputs(output_prefix, key_input, expect_uniprot=False):
+    """Check core artifacts and their identifier relationships."""
+    mutation_file = output_prefix + '.pergeno.aa_mutations.csv'
+    changed_file = output_prefix + '.pergeno.protein_changed.fa'
+    all_file = output_prefix + '.pergeno.protein_all.fa'
+    peff_file = output_prefix + '.pergeno.protein_PEFF.fa'
+    required = [mutation_file, changed_file, all_file, peff_file]
+    if expect_uniprot:
+        required.extend([
+            output_prefix + '.uniprot_changed.tsv',
+            output_prefix + '.uniprot_changed.fa',
+            output_prefix + '.uniprot_all.fa',
+            output_prefix + '.uniprot_PEFF.fa',
+        ])
+    missing = [path for path in required if not os.path.isfile(path)]
+    if missing:
+        raise RuntimeError('missing output files: ' + ', '.join(missing))
+
+    changed_records = list(SeqIO.parse(changed_file, 'fasta'))
+    all_records = list(SeqIO.parse(all_file, 'fasta'))
+    changed_entries = {(record.id, str(record.seq)) for record in changed_records}
+    all_entries = {(record.id, str(record.seq)) for record in all_records}
+    if not changed_entries.issubset(all_entries):
+        raise RuntimeError('changed protein FASTA contains records absent from all-protein FASTA')
+
+    with open(mutation_file, newline='') as handle:
+        rows = csv.DictReader(handle, delimiter='\t')
+        if not rows.fieldnames or 'protein_id_fasta' not in rows.fieldnames:
+            raise RuntimeError('mutation table is missing the protein_id_fasta column')
+        mutated_ids = {row['protein_id_fasta'] for row in rows if row.get('protein_id_fasta')}
+    changed_ids = {record.id for record in changed_records}
+    # The direct variant-string path historically numbers table IDs while its
+    # FASTA uses the source protein ID. Accept that documented alias only.
+    absent = sorted(
+        protein_id for protein_id in mutated_ids
+        if protein_id not in changed_ids and
+        not (protein_id.rsplit('__', 1)[-1].isdigit() and
+             protein_id.rsplit('__', 1)[0] in changed_ids)
+    )
+    if absent:
+        raise RuntimeError('mutation table proteins absent from changed FASTA: ' + ', '.join(absent[:10]))
+
+    # Parse PEFF and UniProt FASTAs as well; empty sequence files are valid.
+    for path in [peff_file] + required[4:]:
+        if path.endswith('.fa'):
+            list(SeqIO.parse(path, 'fasta'))
+
 
 def get_cmd_to_run(key_input, key_variant, sqlite_key, output_test, dc_variant, dc_inputs, path_of_precisionprodb):
     '''
     '''
-    if key_input == 'UniProt' and key_variant != 'str':
-        file_UniProt = dc_inputs[key_input]['UniProt']
-        cmd_UniProt = f' -U {file_UniProt} -t 4 -D Uniprot '
-    else:
-        cmd_UniProt = ' -t 4 '
-    
-    folder_output_dir = ''
     folder_work = os.path.join(output_test, key_input, key_variant, sqlite_key)
     if not os.path.exists(folder_work):
         os.makedirs(folder_work)
@@ -38,47 +86,98 @@ def get_cmd_to_run(key_input, key_variant, sqlite_key, output_test, dc_variant, 
     file_protein = dc_inputs[key_input]['protein']
     file_gtf = dc_inputs[key_input]['gtf']
     datatype = dc_inputs[key_input]['datatype']
-    file_sqlite = f'{output_test}/{key_input}/{key_input}.sqlite'
     output = os.path.join(folder_work, f'{key_input}.{key_variant}.{sqlite_key}')
+    file_sqlite = output + '.sqlite'
     script_folder = os.path.join(path_of_precisionprodb, 'src', 'precisionprodb')
     
     print(f'running test with key_input: {key_input}, key_variant: {key_variant}, sqlite_key: {sqlite_key}')
+    precisionprodb_script = os.path.join(script_folder, 'PrecisionProDB.py')
+    python = sys.executable
+    common = [
+        python, precisionprodb_script,
+        '-m', file_mutation,
+        '-g', file_genome,
+        '-p', file_protein,
+        '-f', file_gtf,
+        '-o', output,
+        '-a', datatype,
+        '--PEFF',
+    ]
+    if key_input == 'UniProt' and key_variant != 'str':
+        common.extend(['-U', dc_inputs[key_input]['UniProt'], '-t', '4', '-D', 'Uniprot'])
+    else:
+        common.extend(['-t', '4'])
+
     if sqlite_key == 'no_sqlite':
         print("Running test: without use sqlite file")
-        cmd = f'cd {folder_work} &&  python {script_folder}/PrecisionProDB.py -m {file_mutation} -g {file_genome} -p {file_protein} -f {file_gtf} -o {output} -a {datatype} --PEFF {cmd_UniProt}'
+        # SQLite is enabled by default; NONE selects the legacy path.
+        return [[*common, '--sqlite', 'NONE']]
     elif sqlite_key == 'sqlite_one_step':
         print("Running test: use SQLite file as intermediate file")
-        if os.path.exists(file_sqlite):
-            print(f"{file_sqlite} exists. Removing it.")
-            os.remove(file_sqlite)
-        cmd = f'cd {folder_work} &&  python {script_folder}/PrecisionProDB.py -m {file_mutation} -g {file_genome} -p {file_protein} -f {file_gtf} -o {output} -a {datatype} --PEFF {cmd_UniProt} -S {file_sqlite}'
+        return [[*common, '-S', file_sqlite]]
     elif sqlite_key == 'sqlite_two_step':
         print("Running test: Generate SQLite file in advance and use SQLite")
-        if os.path.exists(file_sqlite):
-            print(f"{file_sqlite} exists. Removing it.")
-            os.remove(file_sqlite)
-        cmd = f'cd {folder_work} && python {script_folder}/buildSqlite.py -S {file_sqlite} -g {file_genome} -p {file_protein} -f {file_gtf}  -a {datatype} && python {script_folder}/PrecisionProDB.py -m {file_mutation}  -o {output} -a {datatype} --PEFF {cmd_UniProt} -S {file_sqlite}'
-    
-    return cmd
+        build_script = os.path.join(script_folder, 'buildSqlite.py')
+        build_command = [
+            python, build_script,
+            '-S', file_sqlite,
+            '-o', output + '.build',
+            '-g', file_genome,
+            '-p', file_protein,
+            '-f', file_gtf,
+            '-a', datatype,
+        ]
+        execute_command = [*common, '-S', file_sqlite]
+        return [build_command, execute_command]
+
+    raise ValueError(f'Unknown SQLite test mode: {sqlite_key}')
 
 def main_test(dc_variant, dc_inputs, dc_sqlite, output_test, path_of_precisionprodb):
 
-    ls_cmd = []
     ls_results = []
+    failed = False
     for key_input in dc_inputs:
         for key_variant in dc_variant:
             for sqlite_key in dc_sqlite:
                 if sqlite_key == 'no_sqlite' and key_variant == 'str':
                     continue
-                cmd = get_cmd_to_run(key_input, key_variant, sqlite_key, output_test, dc_variant, dc_inputs, path_of_precisionprodb)
-                ls_cmd.append(cmd)
-                ls_results.append(run_command(cmd))
+                commands = get_cmd_to_run(
+                    key_input, key_variant, sqlite_key, output_test, dc_variant,
+                    dc_inputs, path_of_precisionprodb,
+                )
+                folder_work = os.path.join(output_test, key_input, key_variant, sqlite_key)
+                case_ok = True
+                for command in commands:
+                    result = run_command(command, cwd=folder_work)
+                    ls_results.append(result)
+                    if result[1] != 'completed':
+                        case_ok = False
+                        break
+                if case_ok:
+                    output_prefix = os.path.join(
+                        folder_work, f'{key_input}.{key_variant}.{sqlite_key}'
+                    )
+                    try:
+                        validate_case_outputs(
+                            output_prefix,
+                            key_input,
+                            expect_uniprot=(key_input == 'UniProt' and key_variant != 'str'),
+                        )
+                        ls_results.append((output_prefix, 'outputs_validated'))
+                    except Exception as error:
+                        failed = True
+                        print(f'Output validation failed for {output_prefix}: {error}')
+                        ls_results.append((output_prefix, f'validation_failed: {error}'))
+                else:
+                    failed = True
 
     # save ls_results to file
     file_job_summary = os.path.join(output_test, 'test_running_summary.txt')
     with open(file_job_summary, 'w') as f:
         for i, result in enumerate(ls_results):
-            f.write(f'{ls_cmd[i]}\n{result}\n\n')
+            f.write(f'{result[0]}\n{result[1]}\n\n')
+
+    return 1 if failed else 0
 
 
 
@@ -106,6 +205,7 @@ def main():
 
     path_of_precisionprodb = args.src
     path_of_precisionprodb = (path_of_precisionprodb if path_of_precisionprodb else os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    path_of_precisionprodb = os.path.abspath(path_of_precisionprodb)
     output_test = (
         args.output if args.output else os.path.join(path_of_precisionprodb, "test_output")
     )
@@ -160,11 +260,8 @@ def main():
         'sqlite_two_step': ''
     }
     
-    main_test(dc_variant, dc_inputs, dc_sqlite, output_test, path_of_precisionprodb)
+    return main_test(dc_variant, dc_inputs, dc_sqlite, output_test, path_of_precisionprodb)
 
 
 if __name__ == '__main__':
-    main()
-
-
-
+    raise SystemExit(main())

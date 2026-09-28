@@ -180,6 +180,13 @@ ARGUMENT_SPECS = {
             'action': 'store_true',
         },
     },
+    'force': {
+        'flags': ('--force',),
+        'kwargs': {
+            'help': 'Rebuild generated outputs and intermediates for this prefix. External annotation SQLite files are preserved; a SQLite built by this prefix is rebuilt.',
+            'action': 'store_true',
+        },
+    },
     'sqlite': {
         'flags': ('-S', '--sqlite'),
         'kwargs': {
@@ -382,7 +389,7 @@ ARGUMENT_GROUPS = {
     'vcf_selection_mixed': ('no_filter', 'sample_mixed', 'all_chromosomes'),
     'vcf_info_filters': ('info_field', 'info_field_thres'),
     'download_uniprot': ('download', 'uniprot', 'uniprot_min_len', 'peff'),
-    'cleanup': ('keep_all',),
+    'cleanup': ('keep_all', 'force'),
     'sqlite': ('sqlite',),
     'peptide': (
         'peptide', 'peptide_sqlite', 'peptide_enzyme', 'peptide_missed_cleavages',
@@ -395,6 +402,7 @@ ARGUMENT_GROUPS = {
         'file_vcf',
         'outprefix_vcf2mutation',
         'sample_vcf',
+        'force',
         'no_filter',
         'all_chromosomes',
         'info_field',
